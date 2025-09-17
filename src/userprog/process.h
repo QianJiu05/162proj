@@ -29,6 +29,13 @@ struct process {
   struct thread* main_thread; /* Pointer to main thread */
 };
 
+struct pass_args{
+   int argc;
+   char file_name[128];//?
+   char* argv[10];
+   char* page;
+};
+
 void userprog_init(void);
 
 pid_t process_execute(const char* file_name);

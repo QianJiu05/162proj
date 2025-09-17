@@ -46,11 +46,45 @@ void userprog_init(void) {
   ASSERT(success);
 }
 
+static struct pass_args* init_arg(struct pass_args *arg)
+{
+  arg->argc = 0;
+  memset(arg->file_name,'\0',128);
+
+  for(int i = 0; i < 10 ; i++){
+    arg->argv[i] = malloc(sizeof(char)*10);
+  }
+  arg->page = NULL;
+  return arg;
+}
+static void parse_args(const char* file_name, struct pass_args *arg){
+  int len = strlen(file_name);
+  char name[len + 1];
+  strlcpy(name,file_name,len);
+  
+  char *token, *save_ptr;
+  int word_len;
+
+  for (token = strtok_r (name, " ", &save_ptr); token != NULL;
+                          token = strtok_r (NULL, " ", &save_ptr))
+  {
+    word_len = strlen(token);
+    strlcpy(arg->argv[arg->argc],token,word_len);
+    arg->argc++;
+    printf ("'token:%s'\n", token);
+  }
+}
 /* Starts a new thread running a user program loaded from
    FILENAME.  The new thread may be scheduled (and may even exit)
    before process_execute() returns.  Returns the new process's
    process id, or TID_ERROR if the thread cannot be created. */
 pid_t process_execute(const char* file_name) {
+  printf("enter process\n");
+
+  struct pass_args *arg = malloc(sizeof(struct pass_args));
+  init_arg(arg);
+  parse_args(file_name,arg);
+
   char* fn_copy;
   tid_t tid;
 
@@ -62,8 +96,11 @@ pid_t process_execute(const char* file_name) {
     return TID_ERROR;
   strlcpy(fn_copy, file_name, PGSIZE);
 
+  arg->page = fn_copy;
+
   /* Create a new thread to execute FILE_NAME. */
-  tid = thread_create(file_name, PRI_DEFAULT, start_process, fn_copy);
+  // tid = thread_create(file_name, PRI_DEFAULT, start_process, fn_copy);
+  tid = thread_create(file_name, PRI_DEFAULT, start_process, arg);
   if (tid == TID_ERROR)
     palloc_free_page(fn_copy);
   return tid;
@@ -71,8 +108,10 @@ pid_t process_execute(const char* file_name) {
 
 /* A thread function that loads a user process and starts it
    running. */
-static void start_process(void* file_name_) {
-  char* file_name = (char*)file_name_;
+static void start_process(void* arg) {
+  struct pass_args *pass_arg = (struct pass_args*)arg;
+
+  char* file_name = pass_arg->file_name;
   struct thread* t = thread_current();
   struct intr_frame if_;
   bool success, pcb_success;
