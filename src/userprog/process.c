@@ -114,12 +114,6 @@ pid_t process_execute(const char* file_name) {
   strlcpy(fn_copy, file_name, PGSIZE);
 
   arg->page = fn_copy;
-  
-  //test!
-  //(gdb) print *(0xc010a00c)
-  //$1 = 100
-
-  // arg->argc = 100;
 
   /* Create a new thread to execute FILE_NAME. */
   // tid = thread_create(file_name, PRI_DEFAULT, start_process, fn_copy);
@@ -161,14 +155,16 @@ static void start_process(void* arg) {
     if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
     if_.cs = SEL_UCSEG;
     if_.eflags = FLAG_IF | FLAG_MBS;
-    success = load(local_arg->page, &if_.eip, &if_.esp);
+    // success = load(local_arg->page, &if_.eip, &if_.esp);//这里有问题，false了
+    success = load(local_arg->file_name, &if_.eip, &if_.esp);//这里有问题，false了
+
   }
 
   /* 压栈argc和argv */
   // 1. 先压入参数字符串内容
   void* new_esp = if_.esp;
   char* arg_ptrs[MAX_ARGC]; //用户空间无法访问malloc的arg，需要单独保存
-  for(int i = 0; i < local_arg->argc; i++){
+  for(int i = 0; i < local_arg->argc; i++){//从后往前的顺序进行压栈
     int arglen = strlen(local_arg->argv[i]) + 1;
     new_esp -= arglen;//手动模拟压栈，高地址在上，先减下去，再把这部分填充为argv的数据
     memcpy(new_esp,local_arg->argv[i],arglen);
@@ -184,7 +180,7 @@ static void start_process(void* arg) {
       new_esp -= sizeof(char*);
       *(char**)new_esp = arg_ptrs[i];
   }
-  char** argv_on_stack = new_esp;
+  char** argv_on_stack = new_esp;//这时候指向argv数组的起始地址（二维指针）
   
   // 4. 压入 argv 和 argc
   new_esp -= sizeof(char**);
