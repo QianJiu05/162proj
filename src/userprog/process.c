@@ -49,29 +49,46 @@ void userprog_init(void) {
 static struct pass_args* init_arg(struct pass_args *arg)
 {
   arg->argc = 0;
-  memset(arg->file_name,'\0',128);
+  memset(arg->file_name,'\0',MAX_NAME_LENGTH);
 
-  for(int i = 0; i < 10 ; i++){
-    arg->argv[i] = malloc(sizeof(char)*10);
+  for(int i = 0; i < MAX_ARGC - 1 ; i++){
+    arg->argv[i] = malloc(sizeof(char)*10);//假设字符串最大长度为10
   }
+  // arg->argv[MAX_ARGC - 1] = NULL;
   arg->page = NULL;
   return arg;
 }
 static void parse_args(const char* file_name, struct pass_args *arg){
   int len = strlen(file_name);
-  char name[len + 1];
-  strlcpy(name,file_name,len);
+  char cmd[len + 1];
+  strlcpy(cmd,file_name,len+1);
   
   char *token, *save_ptr;
   int word_len;
+  int cnt = 0;
 
-  for (token = strtok_r (name, " ", &save_ptr); token != NULL;
+  for (token = strtok_r (cmd, " ", &save_ptr); token != NULL;
                           token = strtok_r (NULL, " ", &save_ptr))
   {
     word_len = strlen(token);
-    strlcpy(arg->argv[arg->argc],token,word_len);
-    arg->argc++;
-    printf ("'token:%s'\n", token);
+
+    if(cnt == 0){//arg->file_name
+      strlcpy(arg->file_name,token,word_len+1);
+    }else{//argv
+      strlcpy(arg->argv[cnt - 1],token,word_len+1);
+    }
+    cnt++;
+  }
+  arg->argc = cnt - 1;
+
+  int i;
+  if(arg->argc <=1 ){//no argv, only file_name
+    i = 0;
+  }else{//arg
+    i = arg->argc;
+  }
+  for(; i < MAX_ARGC; i++){
+    arg->argv[i] = NULL;
   }
 }
 /* Starts a new thread running a user program loaded from
@@ -79,7 +96,7 @@ static void parse_args(const char* file_name, struct pass_args *arg){
    before process_execute() returns.  Returns the new process's
    process id, or TID_ERROR if the thread cannot be created. */
 pid_t process_execute(const char* file_name) {
-  printf("enter process\n");
+  // printf("enter process\n");//好像没用？？？？
 
   struct pass_args *arg = malloc(sizeof(struct pass_args));
   init_arg(arg);
@@ -97,6 +114,12 @@ pid_t process_execute(const char* file_name) {
   strlcpy(fn_copy, file_name, PGSIZE);
 
   arg->page = fn_copy;
+  
+  //test!
+  //(gdb) print *(0xc010a00c)
+  //$1 = 100
+
+  // arg->argc = 100;
 
   /* Create a new thread to execute FILE_NAME. */
   // tid = thread_create(file_name, PRI_DEFAULT, start_process, fn_copy);
@@ -109,9 +132,9 @@ pid_t process_execute(const char* file_name) {
 /* A thread function that loads a user process and starts it
    running. */
 static void start_process(void* arg) {
-  struct pass_args *pass_arg = (struct pass_args*)arg;
+  struct pass_args *local_arg = (struct pass_args*)arg;
 
-  char* file_name = pass_arg->file_name;
+  // char* file_name = local_arg->file_name;
   struct thread* t = thread_current();
   struct intr_frame if_;
   bool success, pcb_success;
@@ -138,8 +161,41 @@ static void start_process(void* arg) {
     if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
     if_.cs = SEL_UCSEG;
     if_.eflags = FLAG_IF | FLAG_MBS;
-    success = load(file_name, &if_.eip, &if_.esp);
+    success = load(local_arg->page, &if_.eip, &if_.esp);
   }
+
+  /* 压栈argc和argv */
+  // 1. 先压入参数字符串内容
+  void* new_esp = if_.esp;
+  char* arg_ptrs[MAX_ARGC]; //用户空间无法访问malloc的arg，需要单独保存
+  for(int i = 0; i < local_arg->argc; i++){
+    int arglen = strlen(local_arg->argv[i]) + 1;
+    new_esp -= arglen;//手动模拟压栈，高地址在上，先减下去，再把这部分填充为argv的数据
+    memcpy(new_esp,local_arg->argv[i],arglen);
+    arg_ptrs[i] = new_esp;//记录这个参数的地址（用于后面传递argv）
+  }
+  // 2. 对齐 esp 到4字节
+  new_esp = (void*)((unsigned)new_esp & 0xfffffffc);//4 字节对齐要求地址必须是 4 的倍数，即最低两位二进制为 0，stack向下增长，相当于向下取最近的4字节对齐地址。
+  
+  // 3. 压入 argv 指针数组
+  new_esp -= sizeof(char*);//往下-1，由于是向下增长，最上面的是最后一个，应该是NULL
+  *(char**)new_esp = NULL; //把 new_esp 指向的内存（即用户栈上的一个指针空间）写成 NULL，这是在栈上存一个指针，用于 argv[argc] = NULL。
+  for (int i = local_arg->argc-1; i >= 0; i--) {
+      new_esp -= sizeof(char*);
+      *(char**)new_esp = arg_ptrs[i];
+  }
+  char** argv_on_stack = new_esp;
+  
+  // 4. 压入 argv 和 argc
+  new_esp -= sizeof(char**);
+  *(char***)new_esp = argv_on_stack;
+  new_esp -= sizeof(int);
+  *(int*)new_esp = local_arg->argc;
+
+  // 5. 更新 if_.esp
+  if_.esp = new_esp;
+
+
 
   /* Handle failure with succesful PCB malloc. Must free the PCB */
   if (!success && pcb_success) {
@@ -152,7 +208,9 @@ static void start_process(void* arg) {
   }
 
   /* Clean up. Exit on failure or jump to userspace */
-  palloc_free_page(file_name);
+  // palloc_free_page(file_name);
+  palloc_free_page(local_arg->page);
+
   if (!success) {
     sema_up(&temporary);
     thread_exit();
