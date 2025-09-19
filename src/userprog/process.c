@@ -123,6 +123,15 @@ pid_t process_execute(const char* file_name) {
   return tid;
 }
 
+static void free_arg(struct pass_args* arg){
+
+  for(int i = arg->argc-1 ; i >= 0; i--){
+    free(arg->argv[i]);
+  }
+  free(arg);
+  
+}
+
 /* A thread function that loads a user process and starts it
    running. */
 static void start_process(void* arg) {
@@ -164,7 +173,7 @@ static void start_process(void* arg) {
   // 1. 先压入参数字符串内容
   void* new_esp = if_.esp;
   char* arg_ptrs[MAX_ARGC]; //用户空间无法访问malloc的arg，需要单独保存
-  for(int i = 0; i < local_arg->argc; i++){//从后往前的顺序进行压栈
+  for(int i = 0; i < local_arg->argc; i++){//从后往前的顺序进行压栈，起始指针**argv会作为argv的栈顶
     int arglen = strlen(local_arg->argv[i]) + 1;
     new_esp -= arglen;//手动模拟压栈，高地址在上，先减下去，再把这部分填充为argv的数据
     memcpy(new_esp,local_arg->argv[i],arglen);
@@ -206,6 +215,8 @@ static void start_process(void* arg) {
   /* Clean up. Exit on failure or jump to userspace */
   // palloc_free_page(file_name);
   palloc_free_page(local_arg->page);
+
+  free_arg(local_arg);
 
   if (!success) {
     sema_up(&temporary);
