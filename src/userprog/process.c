@@ -197,6 +197,10 @@ static void start_process(void* arg) {
   new_esp -= sizeof(int);
   *(int*)new_esp = local_arg->argc;
 
+  // 5. 压入0作为返回值，不然程序会跑飞
+  new_esp -= sizeof(void*);
+  *(void**)new_esp = 0; // 或 NULL
+
   // 5. 更新 if_.esp
   if_.esp = new_esp;
 
