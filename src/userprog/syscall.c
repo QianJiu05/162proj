@@ -4,28 +4,21 @@
 #include "threads/interrupt.h"
 #include "threads/thread.h"
 #include "userprog/process.h"
+#include "userprog/pagedir.h"
 
 static void syscall_handler(struct intr_frame*);
+
+static void check_valid(uint32_t* args);
 
 void syscall_init(void) { intr_register_int(0x30, 3, INTR_ON, syscall_handler, "syscall"); }
 
 static void syscall_handler(struct intr_frame* f UNUSED) {
+  //The caller’s stack pointer is accessible to syscall_handler as the esp member of the struct intr_frame passed to it
   uint32_t* args = ((uint32_t*)f->esp);
 
-  /*
-   * The following print statement, if uncommented, will print out the syscall
-   * number whenever a process enters a system call. You might find it useful
-   * when debugging. It will cause tests to fail, however, so you should not
-   * include it in your final submission.
-   */
+  check_valid(args);
 
   // printf("System call number: %d\n", args[0]); 
-
-  // if (args[0] == SYS_EXIT) {
-  //   f->eax = args[1];
-  //   printf("%s: exit(%d)\n", thread_current()->pcb->process_name, args[1]);
-  //   process_exit();
-  // }
 
   switch(args[0]){
     case SYS_EXIT:
@@ -40,4 +33,13 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
         return;
   }
 
+}
+
+static void check_valid(uint32_t* args){
+  /* 验证用户提供指针的有效性 */
+  //args是栈顶指针
+  struct thread *t = thread_current();
+  if(pagedir_get_page(t->pcb->pagedir,args) == NULL){
+    process_exit();
+  }
 }

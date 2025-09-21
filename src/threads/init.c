@@ -309,6 +309,9 @@ static char** parse_options(char** argv) {
 /* Runs the task specified in ARGV[1]. */
 static void run_task(char** argv) {
   const char* task = argv[1];
+  
+  //  Since argument passing has not yet been implemented, 
+  //  all of these programs will crash when they access argv[0]
 
   printf("Executing '%s':\n", task);
 #ifdef USERPROG
