@@ -31,12 +31,25 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
         f->eax = args[1] + 1;
         printf("practice add 1\n");
         return;
+    
+    case SYS_HALT:
+        shutdown_power_off();
+        break;
+
+    case SYS_EXEC:
+        // args++;
+        int pid = process_execute(args);
+        f->eax = pid;
+        break;
+
+
+
   }
 
 }
 
+/* 验证用户提供指针的有效性 */
 static void check_valid(uint32_t* args){
-  /* 验证用户提供指针的有效性 */
   //args是栈顶指针
   struct thread *t = thread_current();
   if(pagedir_get_page(t->pcb->pagedir,args) == NULL){

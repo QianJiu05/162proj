@@ -23,7 +23,7 @@
 static struct semaphore temporary;
 static thread_func start_process NO_RETURN;
 static thread_func start_pthread NO_RETURN;
-static bool load(struct pass_args* arg, void (**eip)(void), void** esp);
+bool load(struct pass_args* arg, void (**eip)(void), void** esp);
 bool setup_thread(void (**eip)(void), void** esp);
 
 /* Initializes user programs in the system by ensuring the main
@@ -48,6 +48,7 @@ void userprog_init(void) {
 
 static struct pass_args* init_arg(struct pass_args *arg)
 {
+  //只要记录argc 和 argv即可
   arg->argc = 0;
   memset(arg->file_name,'\0',MAX_NAME_LENGTH);
 
@@ -55,7 +56,7 @@ static struct pass_args* init_arg(struct pass_args *arg)
     arg->argv[i] = malloc(sizeof(char)*10);//假设字符串最大长度为10
   }
   // arg->argv[MAX_ARGC - 1] = NULL;
-  arg->page = NULL;
+  // arg->page = NULL;
   return arg;
 }
 static void parse_args(const char* file_name, struct pass_args *arg){
@@ -73,8 +74,8 @@ static void parse_args(const char* file_name, struct pass_args *arg){
     word_len = strlen(token);
 
     if(cnt == 0){//arg->file_name
-      strlcpy(arg->file_name,token,word_len+1);
-    }else{//argv
+      strlcpy(arg->file_name,token,word_len + 1);
+    }else{
       strlcpy(arg->argv[cnt - 1],token,word_len+1);
     }
     cnt++;
@@ -96,12 +97,7 @@ static void parse_args(const char* file_name, struct pass_args *arg){
    before process_execute() returns.  Returns the new process's
    process id, or TID_ERROR if the thread cannot be created. */
 pid_t process_execute(const char* file_name) {
-  // printf("enter process\n");//好像没用？？？？
-
-  struct pass_args *arg = malloc(sizeof(struct pass_args));
-  init_arg(arg);
-  parse_args(file_name,arg);
-
+  // printf("enter process\n");
   char* fn_copy;
   tid_t tid;
 
@@ -112,30 +108,49 @@ pid_t process_execute(const char* file_name) {
   if (fn_copy == NULL)
     return TID_ERROR;
   strlcpy(fn_copy, file_name, PGSIZE);
+  // printf("fncopy = %s\n",fn_copy);
 
-  arg->page = fn_copy;
+  // arg->page = fn_copy;
+  char* parse_name;
+  char* save_file;
+
+  //不申请一个复制页的话会报错
+  //Kernel panic in run: PANIC at ../../threads/thread.c:277 in thread_current(): assertion `is_thread(t)' failed.
+  char* save_fn;
+  save_fn = palloc_get_page(0);
+  if(save_fn == NULL)
+    return TID_ERROR;
+  
+  strlcpy(save_fn,fn_copy,PGSIZE);
+
+
+  parse_name = strtok_r(save_fn," ",&save_file);//parse_name = elf, savefile= else
+  // printf("parse_name = %s fncopy =%s save=%s \n",parse_name,fn_copy,save_file);
 
   /* Create a new thread to execute FILE_NAME. */
   // tid = thread_create(file_name, PRI_DEFAULT, start_process, fn_copy);
-  tid = thread_create(file_name, PRI_DEFAULT, start_process, arg);
+  //fn_copy必须要传进去，不然没法在startprocess里free page
+  tid = thread_create(parse_name, PRI_DEFAULT, start_process, fn_copy);
   if (tid == TID_ERROR)
     palloc_free_page(fn_copy);
   return tid;
 }
 
 static void free_arg(struct pass_args* arg){
-
   for(int i = arg->argc-1 ; i >= 0; i--){
     free(arg->argv[i]);
   }
   free(arg);
-  
 }
 
 /* A thread function that loads a user process and starts it
    running. */
-static void start_process(void* arg) {
-  struct pass_args *local_arg = (struct pass_args*)arg;
+static void start_process(void* file_name) {
+  struct pass_args *local_arg = malloc(sizeof(struct pass_args));
+  init_arg(local_arg);
+  parse_args(file_name,local_arg);
+  
+
 
   // char* file_name = local_arg->file_name;
   struct thread* t = thread_current();
@@ -165,7 +180,6 @@ static void start_process(void* arg) {
     if_.cs = SEL_UCSEG;
     if_.eflags = FLAG_IF | FLAG_MBS;
     success = load(local_arg, &if_.eip, &if_.esp);
-
   }
 
   /* Handle failure with succesful PCB malloc. Must free the PCB */
@@ -179,10 +193,10 @@ static void start_process(void* arg) {
   }
 
   /* Clean up. Exit on failure or jump to userspace */
-  // palloc_free_page(file_name);
-  palloc_free_page(local_arg->page);
-
   free_arg(local_arg);
+
+  palloc_free_page(file_name);//传进来的是fn copy as filename
+
 
   if (!success) {
     sema_up(&temporary);
@@ -338,7 +352,7 @@ static bool load_segment(struct file* file, off_t ofs, uint8_t* upage, uint32_t 
    Stores the executable's entry point into *EIP
    and its initial stack pointer into *ESP.
    Returns true if successful, false otherwise. */
-// bool load(const char* file_name, void (**eip)(void), void** esp)
+// bool load(const char* file_name, void (**eip)(void), void** esp) 
 bool load(struct pass_args* arg, void (**eip)(void), void** esp) {
 
   const char* file_name = arg->file_name;

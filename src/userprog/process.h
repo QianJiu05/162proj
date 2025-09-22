@@ -35,7 +35,7 @@ struct pass_args{
    int argc;
    char file_name[MAX_NAME_LENGTH];//?
    char* argv[MAX_ARGC];
-   char* page;
+   // char* page;
 };
 
 void userprog_init(void);
