@@ -67,14 +67,14 @@
 int practice(int i) { return syscall1(SYS_PRACTICE, i); }
 
 void halt(void) {
-  syscall0(SYS_HALT);
-  NOT_REACHED();
+        syscall0(SYS_HALT);
+        NOT_REACHED();
 }
 
 void exit(int status) {
-  printf("enter exit\n");
-  syscall1(SYS_EXIT, status);
-  NOT_REACHED();
+        printf("enter exit\n");
+        syscall1(SYS_EXIT, status);
+        NOT_REACHED();
 }
 
 pid_t exec(const char* file) { return (pid_t)syscall1(SYS_EXEC, file); }
@@ -122,8 +122,8 @@ tid_t sys_pthread_create(stub_fun sfun, pthread_fun tfun, const void* arg) {
 }
 
 void sys_pthread_exit() {
-  syscall0(SYS_PT_EXIT);
-  NOT_REACHED();
+        syscall0(SYS_PT_EXIT);
+        NOT_REACHED();
 }
 
 tid_t sys_pthread_join(tid_t tid) { return syscall1(SYS_PT_JOIN, tid); }
