@@ -18,7 +18,7 @@ void syscall_init(void) { intr_register_int(0x30, 3, INTR_ON, syscall_handler, "
 static void syscall_handler(struct intr_frame* f UNUSED) {
   //The caller’s stack pointer is accessible to syscall_handler as the esp member of the struct intr_frame passed to it
   //调用者的堆栈指针可以通过传递给它的 struct intr_frame 的 esp 成员访问。
-  uint32_t* args = ((uint32_t*)f->esp);
+  uint32_t* args = ((uint32_t*)f->esp);//32bit width
 
   check_valid_arg(args);//检查栈顶指针是否有问题
   // printf("arg0 = %d, arg1 = %d\n",args[0],args[1]);

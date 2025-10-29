@@ -60,37 +60,39 @@ static struct pass_args* init_arg(struct pass_args *arg)
   return arg;
 }
 static void parse_args(const char* file_name, struct pass_args *arg){
-  int len = strlen(file_name);
-  char cmd[len + 1];
-  strlcpy(cmd,file_name,len+1);
-  
-  char *token, *save_ptr;
-  int word_len;
-  int cnt = 0;
+    int len = strlen(file_name);
+    char cmd[len + 1];
+    strlcpy(cmd,file_name,len+1);
+    
+    char *token, *save_ptr;
+    int word_len;
+    int cnt = 0;
 
-  for (token = strtok_r (cmd, " ", &save_ptr); token != NULL;
-                          token = strtok_r (NULL, " ", &save_ptr))
-  {
-    word_len = strlen(token);
+    for (token = strtok_r (cmd, " ", &save_ptr); token != NULL;
+                            token = strtok_r (NULL, " ", &save_ptr))
+    {
+        word_len = strlen(token);
 
-    if(cnt == 0){//arg->file_name
-      strlcpy(arg->file_name,token,word_len + 1);
-    }else{
-      strlcpy(arg->argv[cnt - 1],token,word_len+1);
+        if(cnt == 0){//arg->file_name
+            strlcpy(arg->file_name,token,word_len + 1);
+        }else{
+            strlcpy(arg->argv[cnt - 1],token,word_len+1);
+        }
+        cnt++;
     }
-    cnt++;
-  }
-  arg->argc = cnt - 1;
+    arg->argv[cnt] = NULL;//存入NULL表示结束
+    arg->argc = cnt - 1;
 
-  int i;
-  if(arg->argc <=1 ){//no argv, only file_name
-    i = 0;
-  }else{//arg
-    i = arg->argc;
-  }
-  for(; i < MAX_ARGC; i++){
-    arg->argv[i] = NULL;
-  }
+    //不需要处理这个部分了，让条件判断argv!=NULL即可
+    // int i;
+    // if(arg->argc <=1 ){//no argv, only file_name
+    //     i = 0;
+    // }else{//arg
+    //     i = arg->argc;
+    // }
+    // for(; i < MAX_ARGC; i++){
+    //     arg->argv[i] = NULL;
+    // }
 }
 /* Starts a new thread running a user program loaded from
    FILENAME.  The new thread may be scheduled (and may even exit)
@@ -137,8 +139,8 @@ pid_t process_execute(const char* file_name) {
 }
 
 static void free_arg(struct pass_args* arg){
-  for(int i = arg->argc-1 ; i >= 0; i--){
-    free(arg->argv[i]);
+  for(int i = MAX_ARGC - 1 ; i >= 0; i--){
+    free(arg->argv[i]); 
   }
   free(arg);
 }
@@ -150,7 +152,6 @@ static void start_process(void* file_name) {
   init_arg(local_arg);
   parse_args(file_name,local_arg);
   
-
 
   // char* file_name = local_arg->file_name;
   struct thread* t = thread_current();
@@ -442,22 +443,26 @@ bool load(struct pass_args* arg, void (**eip)(void), void** esp) {
   /* 压栈argc和argv */
   // 1. 先压入参数字符串内容
   void* new_esp = *esp;
-  char* arg_ptrs[MAX_ARGC]; //用户空间无法访问malloc的arg，需要单独保存
-  for(int i = 0; i < arg->argc; i++){//从后往前的顺序进行压栈，起始指针**argv会作为argv的栈顶
-    int arglen = strlen(arg->argv[i]) + 1;
-    new_esp -= arglen;//手动模拟压栈，高地址在上，先减下去，再把这部分填充为argv的数据
-    memcpy(new_esp,arg->argv[i],arglen);
-    arg_ptrs[i] = new_esp;//记录这个参数的地址（用于后面传递argv）
+  char* arg_ptrs[MAX_ARGC]; //用户空间无法访问malloc的arg，需要单独保存，如果不用固定数组，goto会报错
+  // int temp = 0;
+  i = 0;
+  for(; arg->argv[i] != NULL; i++){//从后往前的顺序进行压栈，起始指针**argv会作为argv的栈顶
+      int arglen = strlen(arg->argv[i]) + 1;
+      new_esp -= arglen;//手动模拟压栈，高地址在上，先减下去，再把这部分填充为argv的数据
+      memcpy(new_esp,arg->argv[i],arglen);
+      arg_ptrs[i] = new_esp;//记录这个参数的地址（用于后面传递argv）
   }
   // 2. 对齐 esp 到4字节
   new_esp = (void*)((unsigned)new_esp & 0xfffffffc);//4 字节对齐要求地址必须是 4 的倍数，即最低两位二进制为 0，stack向下增长，相当于向下取最近的4字节对齐地址。
   
   // 3. 压入 argv 指针数组
-  new_esp -= sizeof(char*);//往下-1，由于是向下增长，最上面的是最后一个，应该是NULL
-  *(char**)new_esp = NULL; //把 new_esp 指向的内存（即用户栈上的一个指针空间）写成 NULL，这是在栈上存一个指针，用于 argv[argc] = NULL。
-  for (int i = arg->argc-1; i >= 0; i--) {
-      new_esp -= sizeof(char*);
-      *(char**)new_esp = arg_ptrs[i];
+  // new_esp -= sizeof(char*);//往下-1，由于是向下增长，最上面的是最后一个，应该是NULL
+  // *(char**)new_esp = NULL; // argv[argc] = NULL。
+  for (int i = arg->argc; i >= 0; i--) 
+  // for (int i = arg->argc-1; i >= 0; i--) 
+  {
+        new_esp -= sizeof(char*);
+        *(char**)new_esp = arg_ptrs[i];
   }
   char** argv_on_stack = new_esp;//这时候指向argv数组的起始地址（二维指针）
   
@@ -467,7 +472,7 @@ bool load(struct pass_args* arg, void (**eip)(void), void** esp) {
   new_esp -= sizeof(int);
   *(int*)new_esp = arg->argc;
 
-  // 5. 压入0作为返回值，不然程序会跑飞
+  // 5. 压入0作为返回值
   new_esp -= sizeof(void*);
   *(void**)new_esp = 0; // 或 NULL
 
@@ -477,7 +482,7 @@ bool load(struct pass_args* arg, void (**eip)(void), void** esp) {
   /* Start address. */
   *eip = (void (*)(void))ehdr.e_entry;
 
-  // hex_dump(0, *esp, 48, true);
+  hex_dump(0, *esp, 48, true);
 
   success = true;
 

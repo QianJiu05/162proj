@@ -74,7 +74,11 @@ typedef int tid_t;
    an assertion failure in thread_current(), which checks that
    the `magic' member of the running thread's `struct thread' is
    set to THREAD_MAGIC.  Stack overflow will normally change this
-   value, triggering the assertion. */
+   value, triggering the assertion.
+   这两个问题的第一个症状可能是thread_current() 中的断言失败，
+   该断言检查正在运行的线程的“struct thread”中的“magic”成员是否
+   设置为 THREAD_MAGIC。堆栈溢出通常会更改此值，从而触发断言。
+   */
 /* The `elem' member has a dual purpose.  It can be an element in
    the run queue (thread.c), or it can be an element in a
    semaphore wait list (synch.c).  It can be used these two ways
