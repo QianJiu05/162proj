@@ -48,12 +48,11 @@ void userprog_init(void) {
 // arg[0] = filename, then argv[]s
 static struct pass_args* init_arg(struct pass_args *arg)
 {
-  //只要记录argc 和 argv即可
-  arg->argc = 0;
-  for(int i = 0; i < MAX_ARGC; i++){
-    arg->argv[i] = NULL;
-  }
-  return arg;
+    arg->argc = 0;
+    for(int i = 0; i < MAX_ARGC; i++){
+        arg->argv[i] = NULL;
+    }
+    return arg;
 }
 static void parse_args(const char* file_name, struct pass_args *arg){
     if(file_name == NULL || arg == NULL)return;
@@ -76,8 +75,8 @@ static void parse_args(const char* file_name, struct pass_args *arg){
         strlcpy(arg->argv[cnt],token,word_len+1);
         cnt++;
     }
-        arg->argv[cnt] = NULL;//存入NULL表示结束
-        arg->argc = cnt;
+    arg->argv[cnt] = NULL;//存入NULL表示结束
+    arg->argc = cnt;
 }
 /* Starts a new thread running a user program loaded from
    FILENAME.  The new thread may be scheduled (and may even exit)
@@ -93,9 +92,8 @@ pid_t process_execute(const char* file_name) {
      Otherwise there's a race between the caller and load(). */
   fn_copy = palloc_get_page(0);
   if (fn_copy == NULL)
-    return TID_ERROR;
+      return TID_ERROR;
   strlcpy(fn_copy, file_name, PGSIZE);
-  // printf("fncopy = %s\n",fn_copy);
 
   // arg->page = fn_copy;
   char* parse_name;
@@ -137,10 +135,6 @@ static void start_process(void* file_name) {
   init_arg(local_arg);
   parse_args(file_name,local_arg);
   
-
-  // char* file_name = local_arg->file_name;
-  // char* file_name = local_arg->arg[0];
-
   struct thread* t = thread_current();
   struct intr_frame if_;
   bool success, pcb_success;
@@ -190,7 +184,7 @@ static void start_process(void* file_name) {
     sema_up(&temporary);
     thread_exit();
   }
-  hex_dump(0, if_.esp, 128, true);
+  // hex_dump(0, if_.esp, 128, true);
 
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
