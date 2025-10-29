@@ -45,15 +45,12 @@ void userprog_init(void) {
   /* Kill the kernel if we did not succeed */
   ASSERT(success);
 }
-
+// arg[0] = filename, then argv[]s
 static struct pass_args* init_arg(struct pass_args *arg)
 {
   //只要记录argc 和 argv即可
   arg->argc = 0;
-  memset(arg->file_name,'\0',MAX_NAME_LENGTH);
-
   for(int i = 0; i < MAX_ARGC; i++){
-    // arg->argv[i] = malloc(sizeof(char)*10);//假设字符串最大长度为10
     arg->argv[i] = NULL;
   }
   return arg;
@@ -74,32 +71,13 @@ static void parse_args(const char* file_name, struct pass_args *arg){
     {
         word_len = strlen(token);
 
-        if(cnt == 0){//arg->file_name
-            strlcpy(arg->file_name,token,word_len + 1);
-        }else{
-            if(cnt-1 >= MAX_ARGC)break;
-            arg->argv[cnt-1] = malloc(sizeof(char*) * (word_len+1));
-            strlcpy(arg->argv[cnt - 1],token,word_len+1);
-        }
+        if(cnt -1 > MAX_ARGC)break;
+        arg->argv[cnt] = malloc(sizeof(char) * (word_len+1));
+        strlcpy(arg->argv[cnt],token,word_len+1);
         cnt++;
     }
-    if(cnt == 0){
-        arg->argc = 0;
-        arg->argv[0] = NULL;
-    }else{
         arg->argv[cnt] = NULL;//存入NULL表示结束
-        arg->argc = cnt - 1;
-    }
-    //不需要处理这个部分了，让条件判断argv!=NULL即可
-    // int i;
-    // if(arg->argc <=1 ){//no argv, only file_name
-    //     i = 0;
-    // }else{//arg
-    //     i = arg->argc;
-    // }
-    // for(; i < MAX_ARGC; i++){
-    //     arg->argv[i] = NULL;
-    // }
+        arg->argc = cnt;
 }
 /* Starts a new thread running a user program loaded from
    FILENAME.  The new thread may be scheduled (and may even exit)
@@ -161,6 +139,8 @@ static void start_process(void* file_name) {
   
 
   // char* file_name = local_arg->file_name;
+  // char* file_name = local_arg->arg[0];
+
   struct thread* t = thread_current();
   struct intr_frame if_;
   bool success, pcb_success;
@@ -210,6 +190,7 @@ static void start_process(void* file_name) {
     sema_up(&temporary);
     thread_exit();
   }
+  hex_dump(0, if_.esp, 128, true);
 
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
@@ -363,7 +344,8 @@ static bool load_segment(struct file* file, off_t ofs, uint8_t* upage, uint32_t 
 // bool load(const char* file_name, void (**eip)(void), void** esp) 
 bool load(struct pass_args* arg, void (**eip)(void), void** esp) {
 
-  const char* file_name = arg->file_name;
+  // const char* file_name = arg->file_name;
+  const char* file_name = arg->argv[0];
 
   struct thread* t = thread_current();
   struct Elf32_Ehdr ehdr;
@@ -447,40 +429,56 @@ bool load(struct pass_args* arg, void (**eip)(void), void** esp) {
   if (!setup_stack(esp))
     goto done;
 
-  /* 压栈argc和argv */
+
+/*
+      Address         Name         Data        Type
+    0xbffffffc   argv[3][...]    bar\0       char[4]
+    0xbffffff8   argv[2][...]    foo\0       char[4]
+    0xbffffff5   argv[1][...]    -l\0        char[3]
+    0xbfffffed   argv[0][...]    /bin/ls\0   char[8]
+    0xbfffffec   stack-align       0         uint8_t
+    0xbfffffe8   argv[4]           0         char *
+    0xbfffffe4   argv[3]        0xbffffffc   char *
+    0xbfffffe0   argv[2]        0xbffffff8   char *
+    0xbfffffdc   argv[1]        0xbffffff5   char *
+    0xbfffffd8   argv[0]        0xbfffffed   char *
+    0xbfffffd4   argv           0xbfffffd8   char **
+    0xbfffffd0   argc              4         int
+    0xbfffffcc   return address    0         void (*) ()
+*/
   // 1. 先压入参数字符串内容
-  void* new_esp = *esp;
+  void *new_esp = *esp;
   char* arg_ptrs[MAX_ARGC]; //用户空间无法访问malloc的arg，需要单独保存，如果不用固定数组，goto会报错
-  // int temp = 0;
-  i = 0;
-  for(; arg->argv[i] != NULL; i++){//从后往前的顺序进行压栈，起始指针**argv会作为argv的栈顶
-      int arglen = strlen(arg->argv[i]) + 1;
+
+  for(int i = arg->argc-1;i >= 0; i--)//从后往前的顺序进行压栈，起始指针**argv会作为argv的栈顶
+  {
+      size_t arglen = strlen(arg->argv[i]) + 1;
       new_esp -= arglen;//手动模拟压栈，高地址在上，先减下去，再把这部分填充为argv的数据
       memcpy(new_esp,arg->argv[i],arglen);
       arg_ptrs[i] = new_esp;//记录这个参数的地址（用于后面传递argv）
   }
-  // 2. 对齐 esp 到4字节
-  new_esp = (void*)((unsigned)new_esp & 0xfffffffc);//4 字节对齐要求地址必须是 4 的倍数，即最低两位二进制为 0，stack向下增长，相当于向下取最近的4字节对齐地址。
+  
+  // 2. 对齐 esp 到4字节--1111 1111 1111 1111 1111 1111 1111 1100
+  new_esp = (void*)((uintptr_t)new_esp & 0xfffffffc);//4 字节对齐要求地址必须是 4 的倍数，即最低两位二进制为 0，stack向下增长，相当于向下取最近的4字节对齐地址。
   
   // 3. 压入 argv 指针数组
-  // new_esp -= sizeof(char*);//往下-1，由于是向下增长，最上面的是最后一个，应该是NULL
-  // *(char**)new_esp = NULL; // argv[argc] = NULL。
-  for (int i = arg->argc; i >= 0; i--) 
-  // for (int i = arg->argc-1; i >= 0; i--) 
+  new_esp = (void*)((char*)new_esp - sizeof(char*));//往下-1，由于是向下增长，最上面的是最后一个，应该是NULL
+  *(char**)new_esp = NULL; // argv[argc] = NULL。
+  for (int i = arg->argc-1; i >= 0; i--) 
   {
-        new_esp -= sizeof(char*);
+        new_esp = (void*)((char*)new_esp - sizeof(char*));
         *(char**)new_esp = arg_ptrs[i];
   }
-  char** argv_on_stack = new_esp;//这时候指向argv数组的起始地址（二维指针）
+  char** argv_on_stack = (char**)new_esp;//这时候指向argv数组的起始地址（二维指针）
   
   // 4. 压入 argv 和 argc
-  new_esp -= sizeof(char**);
-  *(char***)new_esp = argv_on_stack;
-  new_esp -= sizeof(int);
+  new_esp = (void*)((char*)new_esp - sizeof(char**));
+  *(char***)new_esp = argv_on_stack;//argv
+  new_esp = (void*)((char*)new_esp - sizeof(int));
   *(int*)new_esp = arg->argc;
 
   // 5. 压入0作为返回值
-  new_esp -= sizeof(void*);
+  new_esp = (void*)((char*)new_esp - sizeof(void*));
   *(void**)new_esp = 0; // 或 NULL
 
   // 6. 更新 if_.esp
@@ -489,7 +487,7 @@ bool load(struct pass_args* arg, void (**eip)(void), void** esp) {
   /* Start address. */
   *eip = (void (*)(void))ehdr.e_entry;
 
-  hex_dump(0, *esp, 48, true);
+  // hex_dump(0, *esp, 128, true);
 
   success = true;
 
