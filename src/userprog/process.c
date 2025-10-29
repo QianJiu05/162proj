@@ -52,14 +52,15 @@ static struct pass_args* init_arg(struct pass_args *arg)
   arg->argc = 0;
   memset(arg->file_name,'\0',MAX_NAME_LENGTH);
 
-  for(int i = 0; i < MAX_ARGC - 1 ; i++){
-    arg->argv[i] = malloc(sizeof(char)*10);//假设字符串最大长度为10
+  for(int i = 0; i < MAX_ARGC; i++){
+    // arg->argv[i] = malloc(sizeof(char)*10);//假设字符串最大长度为10
+    arg->argv[i] = NULL;
   }
-  // arg->argv[MAX_ARGC - 1] = NULL;
-  // arg->page = NULL;
   return arg;
 }
 static void parse_args(const char* file_name, struct pass_args *arg){
+    if(file_name == NULL || arg == NULL)return;
+
     int len = strlen(file_name);
     char cmd[len + 1];
     strlcpy(cmd,file_name,len+1);
@@ -76,13 +77,19 @@ static void parse_args(const char* file_name, struct pass_args *arg){
         if(cnt == 0){//arg->file_name
             strlcpy(arg->file_name,token,word_len + 1);
         }else{
+            if(cnt-1 >= MAX_ARGC)break;
+            arg->argv[cnt-1] = malloc(sizeof(char*) * (word_len+1));
             strlcpy(arg->argv[cnt - 1],token,word_len+1);
         }
         cnt++;
     }
-    arg->argv[cnt] = NULL;//存入NULL表示结束
-    arg->argc = cnt - 1;
-
+    if(cnt == 0){
+        arg->argc = 0;
+        arg->argv[0] = NULL;
+    }else{
+        arg->argv[cnt] = NULL;//存入NULL表示结束
+        arg->argc = cnt - 1;
+    }
     //不需要处理这个部分了，让条件判断argv!=NULL即可
     // int i;
     // if(arg->argc <=1 ){//no argv, only file_name
@@ -139,10 +146,10 @@ pid_t process_execute(const char* file_name) {
 }
 
 static void free_arg(struct pass_args* arg){
-  for(int i = MAX_ARGC - 1 ; i >= 0; i--){
-    free(arg->argv[i]); 
-  }
-  free(arg);
+    for(int i = 0; arg->argv[i] != NULL; i++){
+        free(arg->argv[i]); //这里崩溃了
+    }
+    free(arg);
 }
 
 /* A thread function that loads a user process and starts it
