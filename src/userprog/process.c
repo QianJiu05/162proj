@@ -70,7 +70,7 @@ static void parse_args(const char* file_name, struct pass_args *arg){
     {
         word_len = strlen(token);
 
-        if(cnt -1 > MAX_ARGC)break;
+        if(cnt > MAX_ARGC -1)break;//argv 0~127
         arg->argv[cnt] = malloc(sizeof(char) * (word_len+1));
         strlcpy(arg->argv[cnt],token,word_len+1);
         cnt++;
