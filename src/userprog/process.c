@@ -83,7 +83,6 @@ static void parse_args(const char* file_name, struct pass_args *arg){
    before process_execute() returns.  Returns the new process's
    process id, or TID_ERROR if the thread cannot be created. */
 pid_t process_execute(const char* file_name) {
-  // printf("enter process\n");
   char* fn_copy;
   tid_t tid;
 
@@ -95,27 +94,21 @@ pid_t process_execute(const char* file_name) {
       return TID_ERROR;
   strlcpy(fn_copy, file_name, PGSIZE);
 
-  // arg->page = fn_copy;
-  char* parse_name;
-  char* save_file;
+  int16_t fn_len = 0;
+  while(file_name[fn_len] != ' '){
+      fn_len++;
+  }
 
-  //不申请一个复制页的话会报错
-  //Kernel panic in run: PANIC at ../../threads/thread.c:277 in thread_current(): assertion `is_thread(t)' failed.
-  char* save_fn;
-  save_fn = palloc_get_page(0);
-  if(save_fn == NULL)
-    return TID_ERROR;
+  char file_path[fn_len];
+  for(int i = 0; i < fn_len; i++){
+      file_path[i] = file_name[i];
+  }
   
-  strlcpy(save_fn,fn_copy,PGSIZE);
-
-
-  parse_name = strtok_r(save_fn," ",&save_file);//parse_name = elf, savefile= else
   // printf("parse_name = %s fncopy =%s save=%s \n",parse_name,fn_copy,save_file);
-
+  printf("filename=%s\nfncopy=%s\n file_path=%s\n",file_name,fn_copy,file_path);
   /* Create a new thread to execute FILE_NAME. */
-  // tid = thread_create(file_name, PRI_DEFAULT, start_process, fn_copy);
-  //fn_copy必须要传进去，不然没法在startprocess里free page
-  tid = thread_create(parse_name, PRI_DEFAULT, start_process, fn_copy);
+  tid = thread_create(file_path, PRI_DEFAULT, start_process, fn_copy);
+  // tid = thread_create(parse_name, PRI_DEFAULT, start_process, fn_copy);
   if (tid == TID_ERROR)
     palloc_free_page(fn_copy);
   return tid;
@@ -123,7 +116,7 @@ pid_t process_execute(const char* file_name) {
 
 static void free_arg(struct pass_args* arg){
     for(int i = 0; arg->argv[i] != NULL; i++){
-        free(arg->argv[i]); //这里崩溃了
+        free(arg->argv[i]); 
     }
     free(arg);
 }
@@ -423,7 +416,6 @@ bool load(struct pass_args* arg, void (**eip)(void), void** esp) {
   if (!setup_stack(esp))
     goto done;
 
-
 /*
       Address         Name         Data        Type
     0xbffffffc   argv[3][...]    bar\0       char[4]
@@ -444,7 +436,7 @@ bool load(struct pass_args* arg, void (**eip)(void), void** esp) {
   void *new_esp = *esp;
   char* arg_ptrs[MAX_ARGC]; //用户空间无法访问malloc的arg，需要单独保存，如果不用固定数组，goto会报错
 
-  for(int i = arg->argc-1;i >= 0; i--)//从后往前的顺序进行压栈，起始指针**argv会作为argv的栈顶
+  for(int i = arg->argc - 1;i >= 0; i--)//从后往前的顺序进行压栈，起始指针**argv会作为argv的栈顶
   {
       size_t arglen = strlen(arg->argv[i]) + 1;
       new_esp -= arglen;//手动模拟压栈，高地址在上，先减下去，再把这部分填充为argv的数据
