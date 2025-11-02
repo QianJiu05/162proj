@@ -83,48 +83,43 @@ static void parse_args(const char* file_name, struct pass_args *arg){
    before process_execute() returns.  Returns the new process's
    process id, or TID_ERROR if the thread cannot be created. */
 pid_t process_execute(const char* file_name) {
-  char* fn_copy;
-  tid_t tid;
+    char* fn_copy;
+    tid_t tid;
 
-  sema_init(&temporary, 0);
-  /* Make a copy of FILE_NAME.
-     Otherwise there's a race between the caller and load(). */
-  fn_copy = palloc_get_page(0);
-  if (fn_copy == NULL)
-      return TID_ERROR;
-  strlcpy(fn_copy, file_name, PGSIZE);
+    sema_init(&temporary, 0);
+    /* Make a copy of FILE_NAME.
+      Otherwise there's a race between the caller and load(). */
+    fn_copy = palloc_get_page(0);
+    if (fn_copy == NULL)
+        return TID_ERROR;
+    strlcpy(fn_copy, file_name, PGSIZE);
 
-  int16_t fn_len = 0;
-  while(file_name[fn_len] != ' '){
-      fn_len++;
-  }
-
-  char file_path[fn_len];
-  for(int i = 0; i < fn_len; i++){
-      file_path[i] = file_name[i];
-  }
-  
-  // printf("parse_name = %s fncopy =%s save=%s \n",parse_name,fn_copy,save_file);
-  printf("filename=%s\nfncopy=%s\n file_path=%s\n",file_name,fn_copy,file_path);
-  /* Create a new thread to execute FILE_NAME. */
-  tid = thread_create(file_path, PRI_DEFAULT, start_process, fn_copy);
-  // tid = thread_create(parse_name, PRI_DEFAULT, start_process, fn_copy);
-  if (tid == TID_ERROR)
-    palloc_free_page(fn_copy);
-  return tid;
-}
-
-static void free_arg(struct pass_args* arg){
-    for(int i = 0; arg->argv[i] != NULL; i++){
-        free(arg->argv[i]); 
+    int16_t fn_len = 0;
+    while(file_name[fn_len] != ' '){
+        fn_len++;
     }
-    free(arg);
+
+
+    char file_path[fn_len];
+    for(int i = 0; i < fn_len; i++){
+        file_path[i] = file_name[i];
+    }
+    
+    // printf("filename=%s\nfncopy=%s\n file_path=%s\n",file_name,fn_copy,file_path);
+    /* Create a new thread to execute FILE_NAME. */
+    tid = thread_create(file_path, PRI_DEFAULT, start_process, fn_copy);
+    if (tid == TID_ERROR)
+        palloc_free_page(fn_copy);
+    return tid;
 }
+
 
 /* A thread function that loads a user process and starts it
    running. */
 static void start_process(void* file_name) {
-  struct pass_args *local_arg = malloc(sizeof(struct pass_args));
+  // struct pass_args *local_arg = malloc(sizeof(struct pass_args));
+  struct pass_args local;
+  struct pass_args* local_arg = &local;
   init_arg(local_arg);
   parse_args(file_name,local_arg);
   
@@ -168,7 +163,8 @@ static void start_process(void* file_name) {
   }
 
   /* Clean up. Exit on failure or jump to userspace */
-  free_arg(local_arg);
+  
+  // free_arg(local_arg);
 
   palloc_free_page(file_name);//传进来的是fn copy as filename
 
