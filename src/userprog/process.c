@@ -419,7 +419,7 @@ bool load(struct pass_args* arg, void (**eip)(void), void** esp) {
     0xbffffff5   argv[1][...]    -l\0        char[3]
     0xbfffffed   argv[0][...]    /bin/ls\0   char[8]
     0xbfffffec   stack-align       0         uint8_t
-    0xbfffffe8   argv[4]           0         char *
+    0xbfffffe8   argv[4]           0         char *   --> NULL
     0xbfffffe4   argv[3]        0xbffffffc   char *
     0xbfffffe0   argv[2]        0xbffffff8   char *
     0xbfffffdc   argv[1]        0xbffffff5   char *
@@ -430,7 +430,7 @@ bool load(struct pass_args* arg, void (**eip)(void), void** esp) {
 */
   // 1. 先压入参数字符串内容
   void *new_esp = *esp;
-  char* arg_ptrs[MAX_ARGC]; //用户空间无法访问malloc的arg，需要单独保存，如果不用固定数组，goto会报错
+  char* arg_ptrs[MAX_ARGC]; //如果不用固定数组，goto会报错
 
   for(int i = arg->argc - 1;i >= 0; i--)//从后往前的顺序进行压栈，起始指针**argv会作为argv的栈顶
   {
@@ -469,7 +469,7 @@ bool load(struct pass_args* arg, void (**eip)(void), void** esp) {
   /* Start address. */
   *eip = (void (*)(void))ehdr.e_entry;
 
-  // hex_dump(0, *esp, 128, true);
+  hex_dump(0, *esp, 128, true);
 
   success = true;
 
@@ -588,11 +588,11 @@ static bool setup_stack(void** esp) {
 
   kpage = palloc_get_page(PAL_USER | PAL_ZERO);
   if (kpage != NULL) {
-    success = install_page(((uint8_t*)PHYS_BASE) - PGSIZE, kpage, true);
-    if (success)
-      *esp = PHYS_BASE;
-    else
-      palloc_free_page(kpage);
+      success = install_page(((uint8_t*)PHYS_BASE) - PGSIZE, kpage, true);
+      if (success)
+         *esp = PHYS_BASE;
+      else
+         palloc_free_page(kpage);
   }
   return success;
 }
