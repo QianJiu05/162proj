@@ -469,7 +469,7 @@ bool load(struct pass_args* arg, void (**eip)(void), void** esp) {
   /* Start address. */
   *eip = (void (*)(void))ehdr.e_entry;
 
-  hex_dump(0, *esp, 128, true);
+  // hex_dump(0, *esp, 128, true);
 
   success = true;
 

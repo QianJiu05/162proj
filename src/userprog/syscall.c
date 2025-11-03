@@ -7,7 +7,6 @@
 #include "userprog/process.h"
 #include "userprog/pagedir.h"
 
-
 static void syscall_handler(struct intr_frame*);
 
 static void check_valid_arg(void* args);
@@ -54,10 +53,20 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
         f->eax = syscall_wait(args[1]);
         break;
 
+    case SYS_WRITE:
+        int fd = (int)args[1];
+        void* buffer = (void*)args[2];
+        unsigned size = (unsigned)args[3];
+        if(fd == STDOUT_FILENO){
+            putbuf(buffer,size);
+        }
+        break;
+
+
 
     case SYS_PRACTICE:
         f->eax = args[1] + 1;
-        printf("practice\n");
+        // printf("practice\n");
         break;
 
     // case SYS_FORK:

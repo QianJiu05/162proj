@@ -9,10 +9,8 @@ int main(int argc, char* argv[]) {
   int i;
 
   test_name = "args";
-  printf("testname = %s\n",test_name);
 
   msg("begin");
-  printf("begin\n");
   msg("argc = %d", argc);
   for (i = 0; i <= argc; i++)
     if (argv[i] != NULL)
