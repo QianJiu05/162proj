@@ -100,10 +100,11 @@ pid_t process_execute(const char* file_name) {
     }
 
 
-    char file_path[fn_len];
+    char file_path[fn_len+1];
     for(int i = 0; i < fn_len; i++){
         file_path[i] = file_name[i];
     }
+    file_path[fn_len] = '\0';
     
     // printf("filename=%s\nfncopy=%s\n file_path=%s\n",file_name,fn_copy,file_path);
     /* Create a new thread to execute FILE_NAME. */
@@ -429,45 +430,49 @@ bool load(struct pass_args* arg, void (**eip)(void), void** esp) {
     0xbfffffcc   return address    0         void (*) ()
 */
   // 1. 先压入参数字符串内容
-  void *new_esp = *esp;
-  char* arg_ptrs[MAX_ARGC]; //如果不用固定数组，goto会报错
+    void *new_esp = *esp;
+    char* arg_ptrs[MAX_ARGC]; //如果不用固定数组，goto会报错
 
-  for(int i = arg->argc - 1;i >= 0; i--)//从后往前的顺序进行压栈，起始指针**argv会作为argv的栈顶
-  {
-      size_t arglen = strlen(arg->argv[i]) + 1;
-      new_esp -= arglen;//手动模拟压栈，高地址在上，先减下去，再把这部分填充为argv的数据
-      memcpy(new_esp,arg->argv[i],arglen);
-      arg_ptrs[i] = new_esp;//记录这个参数的地址（用于后面传递argv）
-  }
+    for(int i = arg->argc - 1;i >= 0; i--)//从后往前的顺序进行压栈，起始指针**argv会作为argv的栈顶
+    {
+        size_t arglen = strlen(arg->argv[i]) + 1;
+        new_esp -= arglen;//手动模拟压栈，高地址在上，先减下去，再把这部分填充为argv的数据
+        memcpy(new_esp,arg->argv[i],arglen);
+        arg_ptrs[i] = new_esp;//记录这个参数的地址（用于后面传递argv）
+    }
   
-  // 2. 对齐 esp 到4字节--1111 1111 1111 1111 1111 1111 1111 1100
-  new_esp = (void*)((uintptr_t)new_esp & 0xfffffffc);//4 字节对齐要求地址必须是 4 的倍数，即最低两位二进制为 0，stack向下增长，相当于向下取最近的4字节对齐地址。
-  
+  // 2. 对齐 esp 到16字节--1111 1111 1111 1111 1111 1111 1111 0000
+    new_esp = (void*)((uintptr_t)new_esp & ~0xf);//16字节对齐，向下把低4bit置零
+    // printf("16 align = %p\n",new_esp);
+
   // 3. 压入 argv 指针数组
-  new_esp = (void*)((char*)new_esp - sizeof(char*));//往下-1，由于是向下增长，最上面的是最后一个，应该是NULL
-  *(char**)new_esp = NULL; // argv[argc] = NULL。
-  for (int i = arg->argc-1; i >= 0; i--) 
-  {
+    new_esp = (void*)((char*)new_esp - sizeof(char*));//往下-1，由于是向下增长，最上面的是最后一个，应该是NULL
+    *(char**)new_esp = NULL; // argv[argc] = NULL
+    for (int i = arg->argc-1; i >= 0; i--) 
+    {
         new_esp = (void*)((char*)new_esp - sizeof(char*));
         *(char**)new_esp = arg_ptrs[i];
-  }
-  char** argv_on_stack = (char**)new_esp;//这时候指向argv数组的起始地址（二维指针）
+    }
+    // printf("after argv's = %p\n",new_esp);
+    char** argv_on_stack = (char**)new_esp;//这时候指向argv数组的起始地址（二维指针）
   
-  // 4. 压入 argv 和 argc
-  new_esp = (void*)((char*)new_esp - sizeof(char**));
-  *(char***)new_esp = argv_on_stack;//argv
-  new_esp = (void*)((char*)new_esp - sizeof(int));
-  *(int*)new_esp = arg->argc;
+    // 4. 压入 argv 和 argc
+    new_esp = (void*)((char*)new_esp - sizeof(char**));
+    *(char***)new_esp = argv_on_stack;//argv
+    new_esp = (void*)((char*)new_esp - sizeof(int));
+    *(int*)new_esp = arg->argc;
 
-  // 5. 压入0作为返回值
-  new_esp = (void*)((char*)new_esp - sizeof(void*));
-  *(void**)new_esp = 0; // 或 NULL
+    // 5. 压入0作为返回值，返回值要字节对齐？
+    new_esp = (void*)((char*)new_esp - sizeof(void*));
+    *(void**)new_esp = 0; // 或 NULL
+    
+    // printf("esp=%p\n",new_esp);
 
-  // 6. 更新 if_.esp
-  *esp = new_esp;
+    // 6. 更新 if_.esp
+    *esp = new_esp;
 
-  /* Start address. */
-  *eip = (void (*)(void))ehdr.e_entry;
+    /* Start address. */
+    *eip = (void (*)(void))ehdr.e_entry;
 
   // hex_dump(0, *esp, 128, true);
 

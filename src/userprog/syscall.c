@@ -81,12 +81,9 @@ static void check_valid_arg(void* args){
     struct thread *t = thread_current();
     if(args == NULL || pagedir_get_page(t->pcb->pagedir,args) == NULL)
     {//pgdir_getpage已经检查了是否在uaddr
-        // printf("bad ptr\n");
         process_exit();
     }
-    // else{
-    //     printf("ptr is OK\n");
-    // }
+
 }
 static void check_valid_str(const char* str){
     struct thread *t = thread_current();
