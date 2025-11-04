@@ -9,7 +9,7 @@
 
 static void syscall_handler(struct intr_frame*);
 
-static void check_valid_arg(void* args);
+static void check_valid_num(uint32_t* args);
 static void check_valid_str(const char* str);
 
 void syscall_init(void) { intr_register_int(0x30, 3, INTR_ON, syscall_handler, "syscall"); }
@@ -30,7 +30,7 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
 
   // printf("arg0 = %d, arg1 = %s\n",args[0],(char*)args[1]);
 
-  check_valid_arg(args);//检查栈顶指针是否有问题
+  check_valid_num(&args[0]);//检查栈顶指针是否有问题
 
 
   switch(args[0]){
@@ -39,17 +39,19 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
         break;
         
     case SYS_EXIT:
+        check_valid_num(&args[1]);
         f->eax = args[1];
         printf("%s: exit(%d)\n", thread_current()->pcb->process_name, args[1]);
         process_exit();
         break;
     
     case SYS_EXEC:
-        check_valid_str((char*)args[1]);
+        // check_valid_str((char*)args[1]);
         f->eax = syscall_exec((char*)args[1]);
         break;
       
     case SYS_WAIT:
+        check_valid_num(&args[1]);
         f->eax = syscall_wait(args[1]);
         break;
 
@@ -65,8 +67,8 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
 
 
     case SYS_PRACTICE:
+        check_valid_num(&args[1]);
         f->eax = args[1] + 1;
-        // printf("practice\n");
         break;
 
     // case SYS_FORK:
@@ -76,13 +78,26 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
 
 }
 
-/* 验证指针是否在用户空间、指针指向的地址是否是已分配内存的 */
-static void check_valid_arg(void* args){
+/* 验证num是否在用户空间、指针指向的地址是否是已分配内存的 */
+static void check_valid_num(uint32_t* num){
     struct thread *t = thread_current();
-    if(args == NULL || pagedir_get_page(t->pcb->pagedir,args) == NULL)
-    {//pgdir_getpage已经检查了是否在uaddr
-        process_exit();
+    printf("check args[0]:%d\n",*num);
+
+    // if(num == NULL || pagedir_get_page(t->pcb->pagedir,num) == NULL)
+    // {//pgdir_getpage已经检查了是否在uaddr
+    //     process_exit();
+    // }
+    void* this_byte = (void*)num;
+    for(int i = 0; i <= 3; i++){
+        this_byte = (void*)((char*)this_byte + i);
+        if(num == NULL || pagedir_get_page(t->pcb->pagedir,this_byte) == NULL)
+        {//pgdir_getpage已经检查了是否在uaddr
+            process_exit();
+        }
     }
+
+
+
 
 }
 static void check_valid_str(const char* str){

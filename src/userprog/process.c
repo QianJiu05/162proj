@@ -99,14 +99,13 @@ pid_t process_execute(const char* file_name) {
         fn_len++;
     }
 
-
     char file_path[fn_len+1];
     for(int i = 0; i < fn_len; i++){
         file_path[i] = file_name[i];
     }
     file_path[fn_len] = '\0';
     
-    // printf("filename=%s\nfncopy=%s\n file_path=%s\n",file_name,fn_copy,file_path);
+    // printf("filename=%s\nfile_path=%s\n",file_name,file_path);
     /* Create a new thread to execute FILE_NAME. */
     tid = thread_create(file_path, PRI_DEFAULT, start_process, fn_copy);
     if (tid == TID_ERROR)
@@ -164,9 +163,6 @@ static void start_process(void* file_name) {
   }
 
   /* Clean up. Exit on failure or jump to userspace */
-  
-  // free_arg(local_arg);
-
   palloc_free_page(file_name);//传进来的是fn copy as filename
 
 
