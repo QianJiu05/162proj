@@ -431,21 +431,21 @@ bool load(struct pass_args* arg, void (**eip)(void), void** esp) {
     char* arg_ptrs[MAX_ARGC]; //如果不用固定数组，goto会报错
 
     // 压入参数字符串内容
-    for(int i = arg->argc - 1;i >= 0; i--){//从后往前的顺序进行压栈，起始指针**argv会作为argv的栈顶
+    for(int i = arg->argc - 1;i >= 0; i--){
         size_t arglen = strlen(arg->argv[i]) + 1;
-        new_esp -= arglen;//手动模拟压栈，高地址在上，先减下去，再把这部分填充为argv的数据
+        new_esp -= arglen;//手动压栈，高地址在上，先减下去，再把这部分填充为argv的数据
         memcpy(new_esp,arg->argv[i],arglen);
         arg_ptrs[i] = new_esp;//记录这个参数的地址（用于后面传递argv）
     }
     
-    /* 要让argc的位置是16字节对齐的 total = argv[]s + null + argv[][] + argc */
+    /* 要让argc的位置是16字节对齐的，total = argv[]s + null + argv[][] + argc */
     size_t total = (arg->argc+1) * sizeof(char*) + sizeof(char**) + sizeof(int);
     void* align = (void*)((char*)new_esp - total);
     align = (void*)((uintptr_t)align & ~0xf);
     new_esp = (char*)align + total;
     // printf("16 align = %p\n",new_esp);
 
-    // 压入 argv 字符串指针数组
+    /* 压入 argv 字符串指针数组 */
     new_esp = (void*)((char*)new_esp - sizeof(char*));
     *(char**)new_esp = NULL; // argv[argc] = NULL
     for (int i = arg->argc-1; i >= 0; i--) 
@@ -455,7 +455,7 @@ bool load(struct pass_args* arg, void (**eip)(void), void** esp) {
     }
     // printf("after argv's = %p\n",new_esp);
     
-    // 压入 argv入口 和 argc
+    /*  压入 argv入口 和 argc */
     char** argv_on_stack = (char**)new_esp;//这时候指向argv数组的起始地址（二维指针）
     new_esp = (void*)((char*)new_esp - sizeof(char**));
     *(char***)new_esp = argv_on_stack;//argv
@@ -465,11 +465,11 @@ bool load(struct pass_args* arg, void (**eip)(void), void** esp) {
     *(int*)new_esp = arg->argc;
     // printf("after argc = %p\n",new_esp);
 
-    // 5. 压入0作为返回值
+    /* 压入0作为返回值 */
     new_esp = (void*)((char*)new_esp - sizeof(void*));
     *(void**)new_esp = 0; // 或 NULL
 
-    // 6. 更新 if_.esp
+    /* 更新 if_.esp */
     *esp = new_esp;
 
     /* Start address. */

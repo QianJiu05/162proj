@@ -11,6 +11,7 @@ static void syscall_handler(struct intr_frame*);
 
 static void check_valid_num(uint32_t* args);
 static void check_valid_str(const char* str);
+static void check_valid_buffer(const void* buffer, size_t size);
 
 void syscall_init(void) { intr_register_int(0x30, 3, INTR_ON, syscall_handler, "syscall"); }
 
@@ -21,6 +22,19 @@ static uint32_t syscall_exec(const char* file_name){
 }
 static uint32_t syscall_wait(pid_t pid){
     return process_wait(pid);
+}
+static int syscall_write(int fd, void* buffer, size_t size){
+    // int fd = (int)args[1];
+    // void* buffer = (void*)args[2];
+    // unsigned size = (unsigned)args[3];
+
+    int ret = -1;
+
+    if(fd == STDOUT_FILENO){
+        putbuf(buffer,size);
+        ret = 0;
+    }
+    return ret;
 }
 //arg[0]是调用号，其余是参数
 static void syscall_handler(struct intr_frame* f UNUSED) {
@@ -56,12 +70,10 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
         break;
 
     case SYS_WRITE:
-        int fd = (int)args[1];
-        void* buffer = (void*)args[2];
-        unsigned size = (unsigned)args[3];
-        if(fd == STDOUT_FILENO){
-            putbuf(buffer,size);
-        }
+        check_valid_num(&args[1]);
+        check_valid_num(&args[3]);
+        check_valid_buffer((void*)args[2],args[3]);
+        f->eax = syscall_write((int)args[1],(void*)args[2],(size_t)args[3]);
         break;
 
 
@@ -83,27 +95,23 @@ static void check_valid_num(uint32_t* num){
     struct thread *t = thread_current();
     // printf("check args[0]:%d\n",*num);
 
-    // if(num == NULL || pagedir_get_page(t->pcb->pagedir,num) == NULL)
-    // {//pgdir_getpage已经检查了是否在uaddr
-    //     process_exit();
-    // }
+    if(num == NULL || pagedir_get_page(t->pcb->pagedir,num) == NULL)
+    {//pgdir_getpage已经检查了是否在uaddr
+        process_exit();
+    }
     void* this_byte = (void*)num;
-    for(int i = 0; i <= 3; i++){
+    for(int i = 1; i <= 3; i++){
         this_byte = (void*)((char*)this_byte + i);
         if(num == NULL || pagedir_get_page(t->pcb->pagedir,this_byte) == NULL)
         {//pgdir_getpage已经检查了是否在uaddr
             process_exit();
         }
     }
-
-
-
-
 }
 static void check_valid_str(const char* str){
     struct thread *t = thread_current();
     if(str == NULL){
-        printf("bad str\n");
+        printf("empty ptr\n");
         process_exit();
     }
 
@@ -111,10 +119,26 @@ static void check_valid_str(const char* str){
     while(*p != '\0'){
         if(pagedir_get_page(t->pcb->pagedir,p) == NULL){
             printf("bad string\n");
+            process_exit();
         }
         p++;
     }
-    printf("str : %s is OK\n",str);
+}
+static void check_valid_buffer(const void* buffer, size_t size){
+    struct thread *t = thread_current();
+    if(buffer == NULL){
+        printf("empty ptr\n");
+        process_exit();
+    }
+
+    char *p = (char*)buffer;
+    for(size_t i = 0; i < size; i++){
+        if(pagedir_get_page(t->pcb->pagedir,p) == NULL){
+            printf("invalid buffer\n");
+            process_exit();
+        }
+        p++;
+    }
 }
 
 
