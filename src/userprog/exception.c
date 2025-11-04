@@ -107,7 +107,15 @@ static void kill(struct intr_frame* f) {
    example code here shows how to parse that information.  You
    can find more information about both of these in the
    description of "Interrupt 14--Page Fault Exception (#PF)" in
-   [IA32-v3a] section 5.15 "Exception and Interrupt Reference". */
+   [IA32-v3a] section 5.15 "Exception and Interrupt Reference".
+
+   页面错误处理程序。这是一个框架，需要填充才能实现虚拟内存。
+   项目 2 的某些解决方案可能也需要修改此代码。
+   在入口处，发生错误的地址位于 CR2（控制寄存器 2）中，
+   并且有关错误的信息（格式如 exception.h 中的 PF_* 宏所述）位于 F 的 error_code 成员中。
+   此处的示例代码展示了如何解析该信息。
+   您可以在 [IA32-v3a] 第 5.15 节“异常和中断参考”中
+   “中断 14——页面错误异常 (#PF)”的描述中找到有关这两者的更多信息。*/
 static void page_fault(struct intr_frame* f) {
   bool not_present; /* True: not-present page, false: writing r/o page. */
   bool write;       /* True: access was write, false: access was read. */
@@ -120,7 +128,12 @@ static void page_fault(struct intr_frame* f) {
      that caused the fault (that's f->eip).
      See [IA32-v2a] "MOV--Move to/from Control Registers" and
      [IA32-v3a] 5.15 "Interrupt 14--Page Fault Exception
-     (#PF)". */
+     (#PF)".
+     获取故障地址，即导致故障的被访问的虚拟地址。
+     它可能指向代码或数据。
+     它不一定是导致故障的指令的地址（即 f->eip）。
+     参见 [IA32-v2a] “MOV——移入/移出控制寄存器” 和
+     [IA32-v3a] 5.15 “中断 14——页面错误异常 (#PF)”。*/
   asm("movl %%cr2, %0" : "=r"(fault_addr));
 
   /* Turn interrupts back on (they were only off so that we could
@@ -137,9 +150,25 @@ static void page_fault(struct intr_frame* f) {
 
   /* To implement virtual memory, delete the rest of the function
      body, and replace it with code that brings in the page to
-     which fault_addr refers. */
-  printf("Page fault at %p: %s error %s page in %s context.\n", fault_addr,
+     which fault_addr refers.
+
+     要实现虚拟内存，请删除函数体的其余部分，
+     并将其替换为将 fault_addr 指向的页面加载到该页面的代码。
+   */
+
+   /* 用户程序导致page fault，返回exit-1并退出进程*/
+   if(user){
+         printf("Page fault at %p: %s error %s page in %s context.\n", fault_addr,
          not_present ? "not present" : "rights violation", write ? "writing" : "reading",
          user ? "user" : "kernel");
-  kill(f);
+         
+         f->eax = -1;
+         printf("%s: exit(%d)\n", thread_current()->pcb->process_name, -1);
+         process_exit();
+   }
+   /* 内核导致的page fault*/
+   printf("Page fault at %p: %s error %s page in %s context.\n", fault_addr,
+            not_present ? "not present" : "rights violation", write ? "writing" : "reading",
+            user ? "user" : "kernel");
+   kill(f);
 }

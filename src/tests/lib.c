@@ -19,7 +19,12 @@ static void vmsg(const char* format, va_list args, const char* suffix) {
      single buffer and output it in a single system call, because
      that'll (typically) ensure that it gets sent to the console
      atomically.  Otherwise kernel messages like "foo: exit(0)"
-     can end up being interleaved if we're unlucky. */
+     can end up being interleaved if we're unlucky.
+     
+     我们费尽心思将整个消息塞进一个单个缓冲区，并通过一次系统调用输出，
+     因为这样（通常）可以确保它以原子方式发送到控制台。
+     否则，像“foo: exit(0)”这样的内核消息如果运气不好，
+     可能会被交错发送。*/
   static char buf[1024];
 
   snprintf(buf, sizeof buf, "(%s) ", test_name);

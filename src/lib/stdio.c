@@ -20,7 +20,14 @@ static void vsnprintf_helper(char, void*);
    terminator.  BUFFER will always be null-terminated unless
    BUF_SIZE is zero.  Returns the number of characters that would
    have been written to BUFFER, not including a null terminator,
-   had there been enough room. */
+   had there been enough room.
+   
+   与 vprintf() 类似，不同之处在于输出存储在 BUFFER 中，
+   BUFFER 必须有足够的空间容纳 BUF_SIZE 个字符。最多写入
+   BUF_SIZE - 1 个字符到 BUFFER，后跟一个空终止符。
+   除非 BUF_SIZE 为零，否则 BUFFER 将始终以空终止符结尾。
+   返回如果 BUFFER 有足够的空间，本应写入的字符数（不包括空终止符）。 
+*/
 int vsnprintf(char* buffer, size_t buf_size, const char* format, va_list args) {
   /* Set up aux data for vsnprintf_helper(). */
   struct vsnprintf_aux aux;

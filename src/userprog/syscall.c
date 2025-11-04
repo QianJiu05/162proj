@@ -15,6 +15,10 @@ static void check_valid_buffer(const void* buffer, size_t size);
 
 void syscall_init(void) { intr_register_int(0x30, 3, INTR_ON, syscall_handler, "syscall"); }
 
+static void syscall_exit(int status){
+    printf("%s: exit(%d)\n", thread_current()->pcb->process_name, status);
+    process_exit();
+}
 static uint32_t syscall_exec(const char* file_name){
     // const char* file_name = (char*)args[1];
     int exec_pid = process_execute(file_name);
@@ -24,12 +28,7 @@ static uint32_t syscall_wait(pid_t pid){
     return process_wait(pid);
 }
 static int syscall_write(int fd, void* buffer, size_t size){
-    // int fd = (int)args[1];
-    // void* buffer = (void*)args[2];
-    // unsigned size = (unsigned)args[3];
-
     int ret = -1;
-
     if(fd == STDOUT_FILENO){
         putbuf(buffer,size);
         ret = 0;
@@ -55,8 +54,7 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
     case SYS_EXIT:
         check_valid_num(&args[1]);
         f->eax = args[1];
-        printf("%s: exit(%d)\n", thread_current()->pcb->process_name, args[1]);
-        process_exit();
+        syscall_exit(args[1]);
         break;
     
     case SYS_EXEC:
@@ -112,33 +110,50 @@ static void check_valid_str(const char* str){
     struct thread *t = thread_current();
     if(str == NULL){
         printf("empty ptr\n");
-        process_exit();
+        // process_exit();
+        syscall_exit(-1);
     }
 
     char* p = str;
     while(*p != '\0'){
         if(pagedir_get_page(t->pcb->pagedir,p) == NULL){
             printf("bad string\n");
-            process_exit();
+            // process_exit();
+            syscall_exit(-1);
         }
         p++;
     }
 }
 static void check_valid_buffer(const void* buffer, size_t size){
-    struct thread *t = thread_current();
     if(buffer == NULL){
         printf("empty ptr\n");
-        process_exit();
+        // process_exit();
+        syscall_exit(-1);
     }
 
-    char *p = (char*)buffer;
-    for(size_t i = 0; i < size; i++){
-        if(pagedir_get_page(t->pcb->pagedir,p) == NULL){
-            printf("invalid buffer\n");
-            process_exit();
-        }
-        p++;
+    if(size == 0)return;
+
+    struct thread *t = thread_current();
+
+    if(pagedir_get_page(t->pcb->pagedir,buffer) == NULL){
+        printf("bad buffer\n");
+        syscall_exit(-1);
     }
+
+    void* end_buffer = (void*)(char*)buffer + size-1;//指向最后一个字节
+
+    void* start = pg_round_down(buffer);
+    void* end = pg_round_down(end_buffer);
+
+    if(start != end){
+        void* page = (void*)(char*)start + PGSIZE;
+        while(page <= end){
+            if(pagedir_get_page(t->pcb->pagedir,page) == NULL){
+                syscall_exit(-1);
+            }
+            page = (void*)(char*)page + PGSIZE;
+        }
+    }    
 }
 
 
