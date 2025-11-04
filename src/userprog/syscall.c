@@ -81,7 +81,7 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
 /* 验证num是否在用户空间、指针指向的地址是否是已分配内存的 */
 static void check_valid_num(uint32_t* num){
     struct thread *t = thread_current();
-    printf("check args[0]:%d\n",*num);
+    // printf("check args[0]:%d\n",*num);
 
     // if(num == NULL || pagedir_get_page(t->pcb->pagedir,num) == NULL)
     // {//pgdir_getpage已经检查了是否在uaddr
