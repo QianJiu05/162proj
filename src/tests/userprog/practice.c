@@ -5,6 +5,7 @@
 #include <stdio.h>
 
 void test_main(void) {
+  // printf("enter practice\n");
   int i = practice(5);
   if (i != 6) {
     fail("Practice syscall failed because i was not 6 as expected\n");

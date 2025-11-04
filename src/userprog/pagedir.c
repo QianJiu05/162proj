@@ -46,7 +46,12 @@ void pagedir_destroy(uint32_t* pd) {
    If PD does not have a page table for VADDR, behavior depends
    on CREATE.  If CREATE is true, then a new page table is
    created and a pointer into it is returned.  Otherwise, a null
-   pointer is returned. */
+   pointer is returned.
+   返回页面目录 PD 中虚拟地址 VADDR 的页表项地址。
+   如果 PD 没有 VADDR 的页表，则行为取决于 CREATE 语句。
+   如果 CREATE 语句为真，则会创建一个新的页表，
+   并返回指向该页表的指针。否则，返回一个空指针。
+*/
 static uint32_t* lookup_page(uint32_t* pd, const void* vaddr, bool create) {
   uint32_t *pt, *pde;
 
@@ -83,7 +88,14 @@ static uint32_t* lookup_page(uint32_t* pd, const void* vaddr, bool create) {
    If WRITABLE is true, the new page is read/write;
    otherwise it is read-only.
    Returns true if successful, false if memory allocation
-   failed. */
+   failed. 
+   在页面目录 PD 中添加一个映射，
+   将用户虚拟页面 UPAGE 映射到内核虚拟地址 KPAGE 所标识的物理帧。
+   UPAGE 必须尚未被映射。KPAGE 应该是从用户池中获取的页面，
+   可通过 palloc_get_page() 获取。
+   如果 WRITABLE 为真，则新页面可读写；否则，它是只读的。
+   成功则返回 true，失败则返回 false。
+*/
 bool pagedir_set_page(uint32_t* pd, void* upage, void* kpage, bool writable) {
   uint32_t* pte;
 
@@ -106,7 +118,9 @@ bool pagedir_set_page(uint32_t* pd, void* upage, void* kpage, bool writable) {
 /* Looks up the physical address that corresponds to user virtual
    address UADDR in PD.  Returns the kernel virtual address
    corresponding to that physical address, or a null pointer if
-   UADDR is unmapped. */
+   UADDR is unmapped. 
+   查找与 PD 中的用户虚拟地址 UADDR 对应的物理地址。
+   返回与该物理地址对应的内核虚拟地址，如果 UADDR 未映射，则返回空指针。*/
 void* pagedir_get_page(uint32_t* pd, const void* uaddr) {
   uint32_t* pte;
 

@@ -70,7 +70,7 @@ static void parse_args(const char* file_name, struct pass_args *arg){
     {
         word_len = strlen(token);
 
-        if(cnt -1 > MAX_ARGC)break;
+        if(cnt > MAX_ARGC -1)break;//argv 0~127
         arg->argv[cnt] = malloc(sizeof(char) * (word_len+1));
         strlcpy(arg->argv[cnt],token,word_len+1);
         cnt++;
@@ -83,55 +83,43 @@ static void parse_args(const char* file_name, struct pass_args *arg){
    before process_execute() returns.  Returns the new process's
    process id, or TID_ERROR if the thread cannot be created. */
 pid_t process_execute(const char* file_name) {
-  // printf("enter process\n");
-  char* fn_copy;
-  tid_t tid;
+    char* fn_copy;
+    tid_t tid;
 
-  sema_init(&temporary, 0);
-  /* Make a copy of FILE_NAME.
-     Otherwise there's a race between the caller and load(). */
-  fn_copy = palloc_get_page(0);
-  if (fn_copy == NULL)
-      return TID_ERROR;
-  strlcpy(fn_copy, file_name, PGSIZE);
+    sema_init(&temporary, 0);
+    /* Make a copy of FILE_NAME.
+      Otherwise there's a race between the caller and load(). */
+    fn_copy = palloc_get_page(0);
+    if (fn_copy == NULL)
+        return TID_ERROR;
+    strlcpy(fn_copy, file_name, PGSIZE);
 
-  // arg->page = fn_copy;
-  char* parse_name;
-  char* save_file;
-
-  //不申请一个复制页的话会报错
-  //Kernel panic in run: PANIC at ../../threads/thread.c:277 in thread_current(): assertion `is_thread(t)' failed.
-  char* save_fn;
-  save_fn = palloc_get_page(0);
-  if(save_fn == NULL)
-    return TID_ERROR;
-  
-  strlcpy(save_fn,fn_copy,PGSIZE);
-
-
-  parse_name = strtok_r(save_fn," ",&save_file);//parse_name = elf, savefile= else
-  // printf("parse_name = %s fncopy =%s save=%s \n",parse_name,fn_copy,save_file);
-
-  /* Create a new thread to execute FILE_NAME. */
-  // tid = thread_create(file_name, PRI_DEFAULT, start_process, fn_copy);
-  //fn_copy必须要传进去，不然没法在startprocess里free page
-  tid = thread_create(parse_name, PRI_DEFAULT, start_process, fn_copy);
-  if (tid == TID_ERROR)
-    palloc_free_page(fn_copy);
-  return tid;
-}
-
-static void free_arg(struct pass_args* arg){
-    for(int i = 0; arg->argv[i] != NULL; i++){
-        free(arg->argv[i]); //这里崩溃了
+    int16_t fn_len = 0;
+    while(file_name[fn_len] != ' '){
+        fn_len++;
     }
-    free(arg);
+
+    char file_path[fn_len+1];
+    for(int i = 0; i < fn_len; i++){
+        file_path[i] = file_name[i];
+    }
+    file_path[fn_len] = '\0';
+    
+    // printf("filename=%s\nfile_path=%s\n",file_name,file_path);
+    /* Create a new thread to execute FILE_NAME. */
+    tid = thread_create(file_path, PRI_DEFAULT, start_process, fn_copy);
+    if (tid == TID_ERROR)
+        palloc_free_page(fn_copy);
+    return tid;
 }
+
 
 /* A thread function that loads a user process and starts it
    running. */
 static void start_process(void* file_name) {
-  struct pass_args *local_arg = malloc(sizeof(struct pass_args));
+  // struct pass_args *local_arg = malloc(sizeof(struct pass_args));
+  struct pass_args local;
+  struct pass_args* local_arg = &local;
   init_arg(local_arg);
   parse_args(file_name,local_arg);
   
@@ -175,8 +163,6 @@ static void start_process(void* file_name) {
   }
 
   /* Clean up. Exit on failure or jump to userspace */
-  free_arg(local_arg);
-
   palloc_free_page(file_name);//传进来的是fn copy as filename
 
 
@@ -423,7 +409,6 @@ bool load(struct pass_args* arg, void (**eip)(void), void** esp) {
   if (!setup_stack(esp))
     goto done;
 
-
 /*
       Address         Name         Data        Type
     0xbffffffc   argv[3][...]    bar\0       char[4]
@@ -431,7 +416,7 @@ bool load(struct pass_args* arg, void (**eip)(void), void** esp) {
     0xbffffff5   argv[1][...]    -l\0        char[3]
     0xbfffffed   argv[0][...]    /bin/ls\0   char[8]
     0xbfffffec   stack-align       0         uint8_t
-    0xbfffffe8   argv[4]           0         char *
+    0xbfffffe8   argv[4]           0         char *   --> NULL
     0xbfffffe4   argv[3]        0xbffffffc   char *
     0xbfffffe0   argv[2]        0xbffffff8   char *
     0xbfffffdc   argv[1]        0xbffffff5   char *
@@ -440,50 +425,59 @@ bool load(struct pass_args* arg, void (**eip)(void), void** esp) {
     0xbfffffd0   argc              4         int
     0xbfffffcc   return address    0         void (*) ()
 */
-  // 1. 先压入参数字符串内容
-  void *new_esp = *esp;
-  char* arg_ptrs[MAX_ARGC]; //用户空间无法访问malloc的arg，需要单独保存，如果不用固定数组，goto会报错
 
-  for(int i = arg->argc-1;i >= 0; i--)//从后往前的顺序进行压栈，起始指针**argv会作为argv的栈顶
-  {
-      size_t arglen = strlen(arg->argv[i]) + 1;
-      new_esp -= arglen;//手动模拟压栈，高地址在上，先减下去，再把这部分填充为argv的数据
-      memcpy(new_esp,arg->argv[i],arglen);
-      arg_ptrs[i] = new_esp;//记录这个参数的地址（用于后面传递argv）
-  }
-  
-  // 2. 对齐 esp 到4字节--1111 1111 1111 1111 1111 1111 1111 1100
-  new_esp = (void*)((uintptr_t)new_esp & 0xfffffffc);//4 字节对齐要求地址必须是 4 的倍数，即最低两位二进制为 0，stack向下增长，相当于向下取最近的4字节对齐地址。
-  
-  // 3. 压入 argv 指针数组
-  new_esp = (void*)((char*)new_esp - sizeof(char*));//往下-1，由于是向下增长，最上面的是最后一个，应该是NULL
-  *(char**)new_esp = NULL; // argv[argc] = NULL。
-  for (int i = arg->argc-1; i >= 0; i--) 
-  {
+    void* STACK_BOTTOM = PHYS_BASE - PGSIZE;//传入fn_copy的时候只分配了一页
+    void *new_esp = *esp;
+    char* arg_ptrs[MAX_ARGC]; //如果不用固定数组，goto会报错
+
+    // 压入参数字符串内容
+    for(int i = arg->argc - 1;i >= 0; i--){//从后往前的顺序进行压栈，起始指针**argv会作为argv的栈顶
+        size_t arglen = strlen(arg->argv[i]) + 1;
+        new_esp -= arglen;//手动模拟压栈，高地址在上，先减下去，再把这部分填充为argv的数据
+        memcpy(new_esp,arg->argv[i],arglen);
+        arg_ptrs[i] = new_esp;//记录这个参数的地址（用于后面传递argv）
+    }
+    
+    /* 要让argc的位置是16字节对齐的 total = argv[]s + null + argv[][] + argc */
+    size_t total = (arg->argc+1) * sizeof(char*) + sizeof(char**) + sizeof(int);
+    void* align = (void*)((char*)new_esp - total);
+    align = (void*)((uintptr_t)align & ~0xf);
+    new_esp = (char*)align + total;
+    // printf("16 align = %p\n",new_esp);
+
+    // 压入 argv 字符串指针数组
+    new_esp = (void*)((char*)new_esp - sizeof(char*));
+    *(char**)new_esp = NULL; // argv[argc] = NULL
+    for (int i = arg->argc-1; i >= 0; i--) 
+    {
         new_esp = (void*)((char*)new_esp - sizeof(char*));
         *(char**)new_esp = arg_ptrs[i];
-  }
-  char** argv_on_stack = (char**)new_esp;//这时候指向argv数组的起始地址（二维指针）
-  
-  // 4. 压入 argv 和 argc
-  new_esp = (void*)((char*)new_esp - sizeof(char**));
-  *(char***)new_esp = argv_on_stack;//argv
-  new_esp = (void*)((char*)new_esp - sizeof(int));
-  *(int*)new_esp = arg->argc;
+    }
+    // printf("after argv's = %p\n",new_esp);
+    
+    // 压入 argv入口 和 argc
+    char** argv_on_stack = (char**)new_esp;//这时候指向argv数组的起始地址（二维指针）
+    new_esp = (void*)((char*)new_esp - sizeof(char**));
+    *(char***)new_esp = argv_on_stack;//argv
 
-  // 5. 压入0作为返回值
-  new_esp = (void*)((char*)new_esp - sizeof(void*));
-  *(void**)new_esp = 0; // 或 NULL
+    // printf("before argc = %p\n",new_esp);
+    new_esp = (void*)((char*)new_esp - sizeof(int));
+    *(int*)new_esp = arg->argc;
+    // printf("after argc = %p\n",new_esp);
 
-  // 6. 更新 if_.esp
-  *esp = new_esp;
+    // 5. 压入0作为返回值
+    new_esp = (void*)((char*)new_esp - sizeof(void*));
+    *(void**)new_esp = 0; // 或 NULL
 
-  /* Start address. */
-  *eip = (void (*)(void))ehdr.e_entry;
+    // 6. 更新 if_.esp
+    *esp = new_esp;
 
-  // hex_dump(0, *esp, 128, true);
+    /* Start address. */
+    *eip = (void (*)(void))ehdr.e_entry;
 
-  success = true;
+    // hex_dump(0, *esp, 128, true);
+
+    success = true;
 
 done:
   /* We arrive here whether the load is successful or not. */
@@ -600,11 +594,11 @@ static bool setup_stack(void** esp) {
 
   kpage = palloc_get_page(PAL_USER | PAL_ZERO);
   if (kpage != NULL) {
-    success = install_page(((uint8_t*)PHYS_BASE) - PGSIZE, kpage, true);
-    if (success)
-      *esp = PHYS_BASE;
-    else
-      palloc_free_page(kpage);
+      success = install_page(((uint8_t*)PHYS_BASE) - PGSIZE, kpage, true);
+      if (success)
+         *esp = PHYS_BASE;
+      else
+         palloc_free_page(kpage);
   }
   return success;
 }
