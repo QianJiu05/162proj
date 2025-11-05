@@ -29,7 +29,11 @@ bool setup_thread(void (**eip)(void), void** esp);
 /* Initializes user programs in the system by ensuring the main
    thread has a minimal PCB so that it can execute and wait for
    the first user process. Any additions to the PCB should be also
-   initialized here if main needs those members */
+   initialized here if main needs those members
+   通过确保主线程拥有最小的程序控制块 (PCB) 来初始化系统中的用户程序，
+   以便它能够执行并等待第一个用户进程。如果主线程需要这些成员，
+   则对 PCB 的任何新增内容也应在此处初始化。 
+*/
 void userprog_init(void) {
   struct thread* t = thread_current();
   bool success;
@@ -38,14 +42,20 @@ void userprog_init(void) {
      It is imoprtant that this is a call to calloc and not malloc,
      so that t->pcb->pagedir is guaranteed to be NULL (the kernel's
      page directory) when t->pcb is assigned, because a timer interrupt
-     can come at any time and activate our pagedir */
+     can come at any time and activate our pagedir
+
+     分配进程控制块重要的是，这里调用的是 calloc 而不是 malloc，
+     这样才能保证在 t->pcb 被赋值时，
+     t->pcb->pagedir 为 NULL（内核的页目录），
+     因为定时器中断随时可能发生并激活我们的页目录。 
+  */
   t->pcb = calloc(sizeof(struct process), 1);
   success = t->pcb != NULL;
+  list_init(&t->pcb->child_list);
 
   /* Kill the kernel if we did not succeed */
   ASSERT(success);
 }
-// arg[0] = filename, then argv[]s
 static struct pass_args* init_arg(struct pass_args *arg)
 {
     arg->argc = 0;
@@ -66,7 +76,7 @@ static void parse_args(const char* file_name, struct pass_args *arg){
     int cnt = 0;
 
     for (token = strtok_r (cmd, " ", &save_ptr); token != NULL;
-                            token = strtok_r (NULL, " ", &save_ptr))
+            token = strtok_r (NULL, " ", &save_ptr))
     {
         word_len = strlen(token);
 
@@ -81,7 +91,11 @@ static void parse_args(const char* file_name, struct pass_args *arg){
 /* Starts a new thread running a user program loaded from
    FILENAME.  The new thread may be scheduled (and may even exit)
    before process_execute() returns.  Returns the new process's
-   process id, or TID_ERROR if the thread cannot be created. */
+   process id, or TID_ERROR if the thread cannot be created.
+   
+   启动一个新线程，运行从FILENAME 加载的用户程序。
+   新线程可能在 process_execute() 返回之前被调度（甚至可能退出）。
+   返回新进程的进程 ID，如果无法创建线程，则返回 TID_ERROR。*/
 pid_t process_execute(const char* file_name) {
     char* fn_copy;
     tid_t tid;
@@ -105,11 +119,18 @@ pid_t process_execute(const char* file_name) {
     }
     file_path[fn_len] = '\0';
     
-    // printf("filename=%s\nfile_path=%s\n",file_name,file_path);
     /* Create a new thread to execute FILE_NAME. */
     tid = thread_create(file_path, PRI_DEFAULT, start_process, fn_copy);
-    if (tid == TID_ERROR)
+    if (tid == TID_ERROR){
         palloc_free_page(fn_copy);
+    }else{
+        struct thread* t = thread_current();
+
+        struct list_hook child;
+        child.child_pid = tid;
+        list_push_back(&(t->pcb->child_list),&(child.hook));
+        
+    }
     return tid;
 }
 
@@ -170,7 +191,6 @@ static void start_process(void* file_name) {
     sema_up(&temporary);
     thread_exit();
   }
-  // hex_dump(0, if_.esp, 128, true);
 
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
@@ -190,10 +210,18 @@ static void start_process(void* file_name) {
    immediately, without waiting.
 
    This function will be implemented in problem 2-2.  For now, it
-   does nothing. */
-int process_wait(pid_t child_pid UNUSED) {
-  sema_down(&temporary);
-  return 0;
+   does nothing.
+
+   等待进程 ID 为 child_pid 的进程终止，并返回其退出状态。
+   如果该进程是由内核终止的（即由于异常而被杀死），则返回 -1。
+   如果 child_pid 无效，或者它不是调用进程的子进程，或者如果
+   已对给定的 PID 成功调用过 process_wait()，则立即返回 -1，无需等待。
+   此函数将在问题 2-2 中实现。目前，它不执行任何操作。
+ */
+int process_wait(pid_t child_pid) {
+
+    sema_down(&temporary);
+    return 0;
 }
 
 /* Free the current process's resources. */
