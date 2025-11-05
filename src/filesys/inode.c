@@ -56,7 +56,12 @@ void inode_init(void) { list_init(&open_inodes); }
    writes the new inode to sector SECTOR on the file system
    device.
    Returns true if successful.
-   Returns false if memory or disk allocation fails. */
+   Returns false if memory or disk allocation fails.
+   
+   使用 LENGTH 字节的数据初始化一个 inode，
+   并将新 inode 写入文件系统设备上的 SECTOR 扇区。
+   如果成功，则返回 true。
+   如果内存或磁盘分配失败，则返回 false。 */
 bool inode_create(block_sector_t sector, off_t length) {
   struct inode_disk* disk_inode = NULL;
   bool success = false;

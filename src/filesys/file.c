@@ -12,7 +12,10 @@ struct file {
 
 /* Opens a file for the given INODE, of which it takes ownership,
    and returns the new file.  Returns a null pointer if an
-   allocation fails or if INODE is null. */
+   allocation fails or if INODE is null.
+   
+   为给定的 INODE 打开一个文件，并获取该文件的所有权；
+   然后返回新文件。如果分配失败或 INODE 为空，则返回空指针。 */
 struct file* file_open(struct inode* inode) {
   struct file* file = calloc(1, sizeof *file);
   if (inode != NULL && file != NULL) {

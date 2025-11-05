@@ -91,7 +91,6 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
 /* 验证num是否在用户空间、指针指向的地址是否是已分配内存的 */
 static void check_valid_num(uint32_t* num){
     struct thread *t = thread_current();
-    // printf("check args[0]:%d\n",*num);
 
     if(num == NULL || pagedir_get_page(t->pcb->pagedir,num) == NULL)
     {//pgdir_getpage已经检查了是否在uaddr
@@ -102,14 +101,14 @@ static void check_valid_num(uint32_t* num){
         this_byte = (void*)((char*)this_byte + i);
         if(num == NULL || pagedir_get_page(t->pcb->pagedir,this_byte) == NULL)
         {//pgdir_getpage已经检查了是否在uaddr
-            process_exit();
+            // process_exit();
+            syscall_exit(-1);
         }
     }
 }
 static void check_valid_str(const char* str){
     struct thread *t = thread_current();
     if(str == NULL){
-        printf("empty ptr\n");
         // process_exit();
         syscall_exit(-1);
     }
@@ -117,7 +116,7 @@ static void check_valid_str(const char* str){
     char* p = str;
     while(*p != '\0'){
         if(pagedir_get_page(t->pcb->pagedir,p) == NULL){
-            printf("bad string\n");
+            // printf("bad string\n");
             // process_exit();
             syscall_exit(-1);
         }
@@ -126,7 +125,7 @@ static void check_valid_str(const char* str){
 }
 static void check_valid_buffer(const void* buffer, size_t size){
     if(buffer == NULL){
-        printf("empty ptr\n");
+        // printf("empty ptr\n");
         // process_exit();
         syscall_exit(-1);
     }
@@ -136,11 +135,11 @@ static void check_valid_buffer(const void* buffer, size_t size){
     struct thread *t = thread_current();
 
     if(pagedir_get_page(t->pcb->pagedir,buffer) == NULL){
-        printf("bad buffer\n");
+        // printf("bad buffer\n");
         syscall_exit(-1);
     }
 
-    void* end_buffer = (void*)(char*)buffer + size-1;//指向最后一个字节
+    void* end_buffer = (void*)(char*)buffer + size - 1;//指向最后一个字节
 
     void* start = pg_round_down(buffer);
     void* end = pg_round_down(end_buffer);
