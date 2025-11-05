@@ -35,26 +35,25 @@ bool setup_thread(void (**eip)(void), void** esp);
    则对 PCB 的任何新增内容也应在此处初始化。 
 */
 void userprog_init(void) {
-  struct thread* t = thread_current();
-  bool success;
+    struct thread* t = thread_current();
+    bool success;
 
-  /* Allocate process control block
-     It is imoprtant that this is a call to calloc and not malloc,
-     so that t->pcb->pagedir is guaranteed to be NULL (the kernel's
-     page directory) when t->pcb is assigned, because a timer interrupt
-     can come at any time and activate our pagedir
+    /* Allocate process control block
+      It is imoprtant that this is a call to calloc and not malloc,
+      so that t->pcb->pagedir is guaranteed to be NULL (the kernel's
+      page directory) when t->pcb is assigned, because a timer interrupt
+      can come at any time and activate our pagedir
 
-     分配进程控制块重要的是，这里调用的是 calloc 而不是 malloc，
-     这样才能保证在 t->pcb 被赋值时，
-     t->pcb->pagedir 为 NULL（内核的页目录），
-     因为定时器中断随时可能发生并激活我们的页目录。 
-  */
-  t->pcb = calloc(sizeof(struct process), 1);
-  success = t->pcb != NULL;
-  list_init(&t->pcb->child_list);
+      分配进程控制块重要的是，这里调用的是 calloc 而不是 malloc，
+      这样才能保证在 t->pcb 被赋值时，
+      t->pcb->pagedir 为 NULL（内核的页目录），
+      因为定时器中断随时可能发生并激活我们的页目录 */
+    t->pcb = calloc(sizeof(struct process), 1);
+    success = t->pcb != NULL;
+    list_init(&t->pcb->child_list);
 
-  /* Kill the kernel if we did not succeed */
-  ASSERT(success);
+    /* Kill the kernel if we did not succeed */
+    ASSERT(success);
 }
 static struct pass_args* init_arg(struct pass_args *arg)
 {
@@ -125,11 +124,9 @@ pid_t process_execute(const char* file_name) {
         palloc_free_page(fn_copy);
     }else{
         struct thread* t = thread_current();
-
-        struct list_hook child;
-        child.child_pid = tid;
-        list_push_back(&(t->pcb->child_list),&(child.hook));
-        
+        struct child_process *child = malloc(sizeof(struct child_process));
+        child->pid = tid;
+        list_push_back(&(t->pcb->child_list),&(child->elem));
     }
     return tid;
 }
@@ -219,6 +216,29 @@ static void start_process(void* file_name) {
    此函数将在问题 2-2 中实现。目前，它不执行任何操作。
  */
 int process_wait(pid_t child_pid) {
+    struct thread* t = thread_current();
+    struct list* child = &(t->pcb->child_list);
+    struct list_elem* node = &(child->head);
+    if(node == NULL){
+        printf("empty list\n");
+        return -1;
+    }
+    while(node->next != NULL){
+        struct child_process *p = list_entry(node,struct child_process,elem);
+        if(child_pid == p->pid){
+            printf("pid:%d\n",child_pid);
+            /* 已经被等待的不能再被等待，立刻return-1 */
+            if(p->wait_by_parent == true){
+                return -1;
+            }else{
+                p->wait_by_parent = true;
+            }
+            break;
+        }
+
+        
+    }
+    
 
     sema_down(&temporary);
     return 0;
@@ -234,6 +254,11 @@ void process_exit(void) {
     thread_exit();
     NOT_REACHED();
   }
+  struct child_process* in_parent = cur->pcb->parent;
+  in_parent->alive = false;
+  // in_parent->exit_status = ?
+  
+
 
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */

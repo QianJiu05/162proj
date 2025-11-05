@@ -19,10 +19,15 @@ typedef tid_t pid_t;
 typedef void (*pthread_fun)(void*);
 typedef void (*stub_fun)(pthread_fun, void*);
 
-struct list_hook{
-   pid_t child_pid;
-   struct list_elem hook;
+struct child_process{
+   pid_t pid;
+   bool wait_by_parent;    /* 已被等待 */
+   bool alive;             /* 是否还存活 */
+   int exit_status;
+   struct list_elem elem;
+   //sema
 };
+
 
 /* The process control block for a given process. Since
    there can be multiple threads per process, we need a separate
@@ -35,12 +40,10 @@ struct process {
    char process_name[16];      /* Name of the main thread */
    struct thread* main_thread; /* Pointer to main thread */
 
-   pid_t parent;               /* 父进程pid */
-   
    //sema
-   bool wait_by_parent;        /* 是否被父进程等待 */
    struct list child_list;     /* 子进程pid链表 */
-   struct list_hook hook;      /* 链表钩子 */
+
+   struct child_process* parent;  /* 从这里找父进程 */
 };
 
 struct pass_args{
