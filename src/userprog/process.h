@@ -25,7 +25,7 @@ struct child_process{
    bool alive;             /* 是否还存活 */
    int exit_status;
    struct list_elem elem;  /* 挂在父进程的child_list */
-   //sema
+   struct semaphore sema;  /* 用于等待 */
 };
 
 

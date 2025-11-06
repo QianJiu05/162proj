@@ -17,9 +17,10 @@ void syscall_init(void) { intr_register_int(0x30, 3, INTR_ON, syscall_handler, "
 
 static int32_t syscall_exit(int status){
     printf("%s: exit(%d)\n", thread_current()->pcb->process_name, status);
+    thread_current()->pcb->in_parent->exit_status = status;
     process_exit();
     // return thread_current()->pcb->
-    return 0;
+    return status;
 }
 static uint32_t syscall_exec(const char* file_name){
     // const char* file_name = (char*)args[1];
@@ -43,7 +44,7 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
   //调用者的堆栈指针可以通过传递给它的 struct intr_frame 的 esp 成员访问。指针数组
   uint32_t *args = ((uint32_t*)f->esp);//32bit width
 
-  // printf("arg0 = %d, arg1 = %s\n",args[0],(char*)args[1]);
+  printf("arg0 = %d, arg1 = %s\n",args[0],(char*)args[1]);
 
   check_valid_num(&args[0]);//检查栈顶指针是否有问题
 
@@ -55,8 +56,8 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
         
     case SYS_EXIT:
         check_valid_num(&args[1]);
-        f->eax = args[1];
-        syscall_exit(args[1]);
+        // f->eax = args[1];
+        f->eax = syscall_exit(args[1]);
         break;
     
     case SYS_EXEC:
@@ -76,18 +77,13 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
         f->eax = syscall_write((int)args[1],(void*)args[2],(size_t)args[3]);
         break;
 
-
-
     case SYS_PRACTICE:
         check_valid_num(&args[1]);
         f->eax = args[1] + 1;
         break;
 
     // case SYS_FORK:
-
-
   }
-
 }
 
 /* 验证num是否在用户空间、指针指向的地址是否是已分配内存的 */

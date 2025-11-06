@@ -129,8 +129,7 @@ pid_t process_execute(const char* file_name) {
         child->pid = tid;
         child->wait_by_parent = false;
         child->alive = true;
-        // child_exit_status
-        
+        sema_init(&(child->sema),0);
         list_push_back(&(t->pcb->child_list),&(child->elem));
     }
     return tid;
@@ -261,9 +260,10 @@ int process_wait(pid_t child_pid) {
                 return -1;
             }else{
                 p->wait_by_parent = true;
-                sema_down(&temporary);//这里进入等待了
+                sema_down(&p->sema);//这里进入等待
+
+                return p->exit_status;//醒了之后return退出状态
             }
-            break;//好像这个break多余了
         }        
     }    
     /* 找不到这个子进程，不是直接子进程，返回-1 */
@@ -291,14 +291,15 @@ void process_exit(void) {
          process page directory.  We must activate the base page
          directory before destroying the process's page
          directory, or our active page directory will be one
-         that's been freed (and cleared). */
+         that's been freed (and cleared).
+         正确的顺序至关重要。在切换页面目录之前，
+         我们必须将cur->pcb->pagedir 设置为 NULL，
+         这样定时器中断就无法切换回进程页面目录。
+         我们必须先激活基页面目录，然后再销毁进程的页面目录，
+         否则，我们当前活动的页面目录将是已被释放（并清空）的页面目录。 */
     cur->pcb->pagedir = NULL;
     pagedir_activate(NULL);
     pagedir_destroy(pd);
-
-    struct child_process* in_parent = cur->pcb->in_parent;
-    in_parent->alive = false;
-    in_parent->exit_status = 0;
   }
 
   /* Free the PCB of this process and kill this thread
@@ -306,18 +307,23 @@ void process_exit(void) {
      If this happens, then an unfortuantely timed timer interrupt
      can try to activate the pagedir, but it is now freed memory */
   struct process* pcb_to_free = cur->pcb;
+
+  struct child_process* in_parent = pcb_to_free->in_parent;
+  in_parent->alive = false;
+  //暂时让status在调用前填写
+
   cur->pcb = NULL;
 
-  struct list_elem* node = list_begin(&pcb_to_free->child_list);
+  struct list_elem* node = list_begin(&(pcb_to_free->child_list));
   while(node != NULL){
       struct child_process* ch_pcb = list_entry(node,struct child_process,elem);
       free(ch_pcb);
       node = node->next;
   }
-  free(pcb_to_free);
-
-  sema_up(&temporary);
-  thread_exit();
+  /* 主线程一直睡眠到这个线程exit，才被唤醒 */
+    sema_up(&(pcb_to_free->in_parent->sema));
+    free(pcb_to_free);
+    thread_exit();
 }
 
 /* Sets up the CPU for running user code in the current
