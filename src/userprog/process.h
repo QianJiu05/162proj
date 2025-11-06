@@ -27,7 +27,7 @@ struct child_process{
    struct list_elem elem;  /* 挂在父进程的child_list */
    struct semaphore sema;  /* 用于等待 */
 };
-
+#define MAX_FD 128
 
 /* The process control block for a given process. Since
    there can be multiple threads per process, we need a separate

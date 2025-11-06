@@ -209,7 +209,7 @@ static void start_process(void* file_name) {
         t->pcb->in_parent->alive = false;
     }
     sema_up(&temporary);
-    thread_exit();
+    thread_exit();//这里没有释放pcb的pd。会造成内存泄漏嘛?-->process_exit?
   }
 
   /* Start the user process by simulating a return from an

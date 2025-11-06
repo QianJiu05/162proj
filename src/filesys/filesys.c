@@ -52,7 +52,10 @@ bool filesys_create(const char* name, off_t initial_size) {
    Returns the new file if successful or a null pointer
    otherwise.
    Fails if no file named NAME exists,
-   or if an internal memory allocation fails. */
+   or if an internal memory allocation fails.
+   打开指定名称的文件。如果成功，则返回新文件；
+   否则返回空指针。如果不存在名为 NAME 的文件，
+   或者内部内存分配失败，则打开失败。*/
 struct file* filesys_open(const char* name) {
   struct dir* dir = dir_open_root();
   struct inode* inode = NULL;
