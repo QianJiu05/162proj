@@ -15,9 +15,11 @@ static void check_valid_buffer(const void* buffer, size_t size);
 
 void syscall_init(void) { intr_register_int(0x30, 3, INTR_ON, syscall_handler, "syscall"); }
 
-static void syscall_exit(int status){
+static int32_t syscall_exit(int status){
     printf("%s: exit(%d)\n", thread_current()->pcb->process_name, status);
     process_exit();
+    // return thread_current()->pcb->
+    return 0;
 }
 static uint32_t syscall_exec(const char* file_name){
     // const char* file_name = (char*)args[1];

@@ -190,6 +190,7 @@ tid_t thread_create(const char* name, int priority, thread_func* function, void*
   /* Initialize thread. */
   init_thread(t, name, priority);
   tid = t->tid = allocate_tid();
+  t->parent = thread_current();//链接父线程
 
   /* Stack frame for kernel_thread(). */
   kf = alloc_frame(t, sizeof *kf);

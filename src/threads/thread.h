@@ -100,6 +100,7 @@ struct thread {
 #ifdef USERPROG
   /* Owned by process.c. */
   struct process* pcb; /* Process control block if this thread is a userprog */
+  struct thread* parent; /* 通过父线程找到父进程 */
 #endif
 
   /* Owned by thread.c. */

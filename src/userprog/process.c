@@ -123,9 +123,14 @@ pid_t process_execute(const char* file_name) {
     if (tid == TID_ERROR){
         palloc_free_page(fn_copy);
     }else{
+        /* 此时还在父进程中 */
         struct thread* t = thread_current();
         struct child_process *child = malloc(sizeof(struct child_process));
         child->pid = tid;
+        child->wait_by_parent = false;
+        child->alive = true;
+        // child_exit_status
+        
         list_push_back(&(t->pcb->child_list),&(child->elem));
     }
     return tid;
@@ -135,7 +140,6 @@ pid_t process_execute(const char* file_name) {
 /* A thread function that loads a user process and starts it
    running. */
 static void start_process(void* file_name) {
-  // struct pass_args *local_arg = malloc(sizeof(struct pass_args));
   struct pass_args local;
   struct pass_args* local_arg = &local;
   init_arg(local_arg);
@@ -159,6 +163,22 @@ static void start_process(void* file_name) {
     // Continue initializing the PCB as normal
     t->pcb->main_thread = t;
     strlcpy(t->pcb->process_name, t->name, sizeof t->name);
+
+    list_init(&(t->pcb->child_list));
+    t->pcb->in_parent = NULL;
+    
+    struct thread* parent_thread = t->parent;
+    if(parent_thread != NULL && parent_thread->pcb != NULL){
+        struct list_elem *node = list_begin(&(parent_thread->pcb->child_list));
+        while(node != NULL){
+            struct child_process* ch_pcb = list_entry(node,struct child_process,elem);
+            if(ch_pcb->pid == t->tid){
+                t->pcb->in_parent = ch_pcb;
+                break;
+            }
+            node = node->next;
+        }
+    }
   }
 
   /* Initialize interrupt frame and load executable. */
@@ -185,6 +205,10 @@ static void start_process(void* file_name) {
 
 
   if (!success) {
+    if(t->pcb != NULL && t->pcb->in_parent != NULL){
+        t->pcb->in_parent->exit_status = -1;
+        t->pcb->in_parent->alive = false;
+    }
     sema_up(&temporary);
     thread_exit();
   }
@@ -223,25 +247,27 @@ int process_wait(pid_t child_pid) {
         printf("empty list\n");
         return -1;
     }
+    bool find = false;
     while(node->next != NULL){
         struct child_process *p = list_entry(node,struct child_process,elem);
         if(child_pid == p->pid){
+            find = true;
             printf("pid:%d\n",child_pid);
             /* 已经被等待的不能再被等待，立刻return-1 */
+            if(p->alive == false){
+                return p->exit_status;
+            }
             if(p->wait_by_parent == true){
                 return -1;
             }else{
                 p->wait_by_parent = true;
+                sema_down(&temporary);//这里进入等待了
             }
-            break;
-        }
-
-        
-    }
-    
-
-    sema_down(&temporary);
-    return 0;
+            break;//好像这个break多余了
+        }        
+    }    
+    /* 找不到这个子进程，不是直接子进程，返回-1 */
+    if(find == false)return -1;
 }
 
 /* Free the current process's resources. */
@@ -254,12 +280,7 @@ void process_exit(void) {
     thread_exit();
     NOT_REACHED();
   }
-  struct child_process* in_parent = cur->pcb->parent;
-  in_parent->alive = false;
-  // in_parent->exit_status = ?
   
-
-
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
   pd = cur->pcb->pagedir;
@@ -274,6 +295,10 @@ void process_exit(void) {
     cur->pcb->pagedir = NULL;
     pagedir_activate(NULL);
     pagedir_destroy(pd);
+
+    struct child_process* in_parent = cur->pcb->in_parent;
+    in_parent->alive = false;
+    in_parent->exit_status = 0;
   }
 
   /* Free the PCB of this process and kill this thread
@@ -282,6 +307,13 @@ void process_exit(void) {
      can try to activate the pagedir, but it is now freed memory */
   struct process* pcb_to_free = cur->pcb;
   cur->pcb = NULL;
+
+  struct list_elem* node = list_begin(&pcb_to_free->child_list);
+  while(node != NULL){
+      struct child_process* ch_pcb = list_entry(node,struct child_process,elem);
+      free(ch_pcb);
+      node = node->next;
+  }
   free(pcb_to_free);
 
   sema_up(&temporary);
@@ -479,7 +511,7 @@ bool load(struct pass_args* arg, void (**eip)(void), void** esp) {
     0xbfffffcc   return address    0         void (*) ()
 */
 
-    void* STACK_BOTTOM = PHYS_BASE - PGSIZE;//传入fn_copy的时候只分配了一页
+    // void* STACK_BOTTOM = PHYS_BASE - PGSIZE;//传入fn_copy的时候只分配了一页
     void *new_esp = *esp;
     char* arg_ptrs[MAX_ARGC]; //如果不用固定数组，goto会报错
 
@@ -496,38 +528,30 @@ bool load(struct pass_args* arg, void (**eip)(void), void** esp) {
     void* align = (void*)((char*)new_esp - total);
     align = (void*)((uintptr_t)align & ~0xf);
     new_esp = (char*)align + total;
-    // printf("16 align = %p\n",new_esp);
 
     /* 压入 argv 字符串指针数组 */
     new_esp = (void*)((char*)new_esp - sizeof(char*));
     *(char**)new_esp = NULL; // argv[argc] = NULL
-    for (int i = arg->argc-1; i >= 0; i--) 
-    {
+    for (int i = arg->argc-1; i >= 0; i--){
         new_esp = (void*)((char*)new_esp - sizeof(char*));
         *(char**)new_esp = arg_ptrs[i];
     }
-    // printf("after argv's = %p\n",new_esp);
     
     /*  压入 argv入口 和 argc */
     char** argv_on_stack = (char**)new_esp;//这时候指向argv数组的起始地址（二维指针）
     new_esp = (void*)((char*)new_esp - sizeof(char**));
     *(char***)new_esp = argv_on_stack;//argv
 
-    // printf("before argc = %p\n",new_esp);
     new_esp = (void*)((char*)new_esp - sizeof(int));
     *(int*)new_esp = arg->argc;
-    // printf("after argc = %p\n",new_esp);
 
     /* 压入0作为返回值 */
     new_esp = (void*)((char*)new_esp - sizeof(void*));
     *(void**)new_esp = 0; // 或 NULL
-
     /* 更新 if_.esp */
     *esp = new_esp;
-
     /* Start address. */
     *eip = (void (*)(void))ehdr.e_entry;
-
     // hex_dump(0, *esp, 128, true);
 
     success = true;

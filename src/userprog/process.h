@@ -24,7 +24,7 @@ struct child_process{
    bool wait_by_parent;    /* 已被等待 */
    bool alive;             /* 是否还存活 */
    int exit_status;
-   struct list_elem elem;
+   struct list_elem elem;  /* 挂在父进程的child_list */
    //sema
 };
 
@@ -42,8 +42,9 @@ struct process {
 
    //sema
    struct list child_list;     /* 子进程pid链表 */
+   struct child_process* in_parent;  /* 自己在父进程的节点 */
 
-   struct child_process* parent;  /* 从这里找父进程 */
+   int exit_status;
 };
 
 struct pass_args{
