@@ -180,16 +180,30 @@ static void start_process(void* file_name) {
       struct thread* parent_thread = t->parent;
       if(parent_thread != NULL && parent_thread->pcb != NULL){
           struct list_elem *node = list_begin(&(parent_thread->pcb->child_list));
-          while(node != NULL){
-              struct child_process* ch_pcb = list_entry(node,struct child_process,elem);
+
+          for(struct list_elem *e = list_begin(&(parent_thread->pcb->child_list));
+                  e != list_end(&(parent_thread->pcb->child_list));
+                  e = list_next(e))
+          {
+              struct child_process* ch_pcb = list_entry(e,struct child_process,elem);
               if(ch_pcb->pid == t->tid){
                   t->pcb->in_parent = ch_pcb;
                   /* 标记为alive，如果创建失败改成false */
                   ch_pcb->alive = true;
                   break;
               }
-              node = node->next;
           }
+
+          // while(node != NULL){
+          //     struct child_process* ch_pcb = list_entry(node,struct child_process,elem);
+          //     if(ch_pcb->pid == t->tid){
+          //         t->pcb->in_parent = ch_pcb;
+          //         /* 标记为alive，如果创建失败改成false */
+          //         ch_pcb->alive = true;
+          //         break;
+          //     }
+          //     node = node->next;
+          // }
       }
     }
 
@@ -333,15 +347,14 @@ void process_exit(void) {
     if(in_parent != NULL){
         in_parent->alive = false;
         //暂时让in_parent->status在调用前填写
-        struct list_elem* node = list_begin(&(pcb_to_free->child_list));
-        /* 这里出问题了,暂时不管 */
-        // while(node != NULL){
-        //     struct child_process* ch_pcb = list_entry(node,struct child_process,elem);
-        //     free(ch_pcb);
-        //     node = node->next;
-        // }
 
-        /* 主线程一直睡眠到这个线程exit，才被唤醒 */
+        /* 清除该PCB的child_list */
+        while (!list_empty(&pcb_to_free->child_list)) {
+            struct list_elem* e = list_pop_front(&pcb_to_free->child_list);
+            struct child_process* child = list_entry(e, struct child_process, elem);
+            free(child);
+        }
+        /* 主线程一直睡眠到这个进程exit，才被唤醒 */
         sema_up(&(pcb_to_free->in_parent->sema));
     }
 
