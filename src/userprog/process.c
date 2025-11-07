@@ -20,6 +20,9 @@
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 
+/* 父进程必须先确认子进程是否成功加载了其可执行文件，才能从 exec 调用中返回。
+  您必须使用适当的同步机制来确保这一点。
+  temporary用来让父进程进入等待 */
 static struct semaphore temporary;
 static thread_func start_process NO_RETURN;
 static thread_func start_pthread NO_RETURN;
@@ -120,17 +123,25 @@ pid_t process_execute(const char* file_name) {
     
     /* Create a new thread to execute FILE_NAME. */
     tid = thread_create(file_path, PRI_DEFAULT, start_process, fn_copy);
+
     if (tid == TID_ERROR){
         palloc_free_page(fn_copy);
+        return TID_ERROR;
     }else{
         /* 此时还在父进程中 */
         struct thread* t = thread_current();
         struct child_process *child = malloc(sizeof(struct child_process));
         child->pid = tid;
         child->wait_by_parent = false;
-        child->alive = true;
+        child->alive = false;
         sema_init(&(child->sema),0);
         list_push_back(&(t->pcb->child_list),&(child->elem));
+
+        /* down temporary让父进程进入等待，creat后唤醒父进程，
+           不论是否成功，然后初始化child_PCB并返回tid */
+        sema_down(&temporary);
+        if(child->alive == false){return TID_ERROR;}
+
     }
     return tid;
 }
@@ -139,87 +150,90 @@ pid_t process_execute(const char* file_name) {
 /* A thread function that loads a user process and starts it
    running. */
 static void start_process(void* file_name) {
-  struct pass_args local;
-  struct pass_args* local_arg = &local;
-  init_arg(local_arg);
-  parse_args(file_name,local_arg);
-  
-  struct thread* t = thread_current();
-  struct intr_frame if_;
-  bool success, pcb_success;
-
-  /* Allocate process control block */
-  struct process* new_pcb = malloc(sizeof(struct process));
-  success = pcb_success = new_pcb != NULL;
-
-  /* Initialize process control block */
-  if (success) {
-    // Ensure that timer_interrupt() -> schedule() -> process_activate()
-    // does not try to activate our uninitialized pagedir
-    new_pcb->pagedir = NULL;
-    t->pcb = new_pcb;
-
-    // Continue initializing the PCB as normal
-    t->pcb->main_thread = t;
-    strlcpy(t->pcb->process_name, t->name, sizeof t->name);
-
-    list_init(&(t->pcb->child_list));
-    t->pcb->in_parent = NULL;
+    struct pass_args local;
+    struct pass_args* local_arg = &local;
+    init_arg(local_arg);
+    parse_args(file_name,local_arg);
     
-    struct thread* parent_thread = t->parent;
-    if(parent_thread != NULL && parent_thread->pcb != NULL){
-        struct list_elem *node = list_begin(&(parent_thread->pcb->child_list));
-        while(node != NULL){
-            struct child_process* ch_pcb = list_entry(node,struct child_process,elem);
-            if(ch_pcb->pid == t->tid){
-                t->pcb->in_parent = ch_pcb;
-                break;
-            }
-            node = node->next;
-        }
+    struct thread* t = thread_current();
+    struct intr_frame if_;
+    bool success, pcb_success;
+
+    /* Allocate process control block */
+    struct process* new_pcb = malloc(sizeof(struct process));
+    success = pcb_success = new_pcb != NULL;
+
+    /* Initialize process control block */
+    if (success) {
+      // Ensure that timer_interrupt() -> schedule() -> process_activate()
+      // does not try to activate our uninitialized pagedir
+      new_pcb->pagedir = NULL;
+      t->pcb = new_pcb;
+
+      // Continue initializing the PCB as normal
+      t->pcb->main_thread = t;
+      strlcpy(t->pcb->process_name, t->name, sizeof t->name);
+
+      list_init(&(t->pcb->child_list));
+      t->pcb->in_parent = NULL;
+      
+      struct thread* parent_thread = t->parent;
+      if(parent_thread != NULL && parent_thread->pcb != NULL){
+          struct list_elem *node = list_begin(&(parent_thread->pcb->child_list));
+          while(node != NULL){
+              struct child_process* ch_pcb = list_entry(node,struct child_process,elem);
+              if(ch_pcb->pid == t->tid){
+                  t->pcb->in_parent = ch_pcb;
+                  /* 标记为alive，如果创建失败改成false */
+                  ch_pcb->alive = true;
+                  break;
+              }
+              node = node->next;
+          }
+      }
     }
-  }
 
-  /* Initialize interrupt frame and load executable. */
-  if (success) {
-    memset(&if_, 0, sizeof if_);
-    if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
-    if_.cs = SEL_UCSEG;
-    if_.eflags = FLAG_IF | FLAG_MBS;
-    success = load(local_arg, &if_.eip, &if_.esp);
-  }
-
-  /* Handle failure with succesful PCB malloc. Must free the PCB */
-  if (!success && pcb_success) {
-    // Avoid race where PCB is freed before t->pcb is set to NULL
-    // If this happens, then an unfortuantely timed timer interrupt
-    // can try to activate the pagedir, but it is now freed memory
-    struct process* pcb_to_free = t->pcb;
-    t->pcb = NULL;
-    free(pcb_to_free);
-  }
-
-  /* Clean up. Exit on failure or jump to userspace */
-  palloc_free_page(file_name);//传进来的是fn copy as filename
-
-
-  if (!success) {
-    if(t->pcb != NULL && t->pcb->in_parent != NULL){
-        t->pcb->in_parent->exit_status = -1;
-        t->pcb->in_parent->alive = false;
+    /* Initialize interrupt frame and load executable. */
+    if (success) {
+      memset(&if_, 0, sizeof if_);
+      if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
+      if_.cs = SEL_UCSEG;
+      if_.eflags = FLAG_IF | FLAG_MBS;
+      success = load(local_arg, &if_.eip, &if_.esp);
     }
-    sema_up(&temporary);
-    thread_exit();//这里没有释放pcb的pd。会造成内存泄漏嘛?-->process_exit?
-  }
 
-  /* Start the user process by simulating a return from an
-     interrupt, implemented by intr_exit (in
-     threads/intr-stubs.S).  Because intr_exit takes all of its
-     arguments on the stack in the form of a `struct intr_frame',
-     we just point the stack pointer (%esp) to our stack frame
-     and jump to it. */
-  asm volatile("movl %0, %%esp; jmp intr_exit" : : "g"(&if_) : "memory");
-  NOT_REACHED();
+    /* Handle failure with succesful PCB malloc. Must free the PCB */
+    if (!success && pcb_success) {
+      // Avoid race where PCB is freed before t->pcb is set to NULL
+      // If this happens, then an unfortuantely timed timer interrupt
+      // can try to activate the pagedir, but it is now freed memory
+      struct process* pcb_to_free = t->pcb;
+      t->pcb = NULL;
+      free(pcb_to_free);
+    }
+
+    /* Clean up. Exit on failure or jump to userspace */
+    palloc_free_page(file_name);//传进来的是fn copy as filename
+
+    if (!success) {
+      if(t->pcb != NULL && t->pcb->in_parent != NULL){
+          t->pcb->in_parent->exit_status = -1;
+          t->pcb->in_parent->alive = false;
+      }
+      sema_up(&temporary);//加载失败时释放信号量
+      thread_exit();//这里没有释放pcb的pd。会造成内存泄漏嘛?-->process_exit?
+    }
+
+    sema_up(&temporary);//加载成功也要释放信号量
+
+    /* Start the user process by simulating a return from an
+      interrupt, implemented by intr_exit (in
+      threads/intr-stubs.S).  Because intr_exit takes all of its
+      arguments on the stack in the form of a `struct intr_frame',
+      we just point the stack pointer (%esp) to our stack frame
+      and jump to it. */
+    asm volatile("movl %0, %%esp; jmp intr_exit" : : "g"(&if_) : "memory");
+    NOT_REACHED();
 }
 
 /* Waits for process with PID child_pid to die and returns its exit status.
@@ -252,19 +266,22 @@ int process_wait(pid_t child_pid) {
         if(child_pid == p->pid){
             find = true;
             printf("pid:%d\n",child_pid);
-            /* 已经被等待的不能再被等待，立刻return-1 */
+            /* 已经死了，不能再等待了 */
             if(p->alive == false){
                 return p->exit_status;
             }
+            /* 已经被等待的不能再被等待，立刻return-1 */
             if(p->wait_by_parent == true){
                 return -1;
             }else{
+                /* 没死&没被等待，进入等待 */
                 p->wait_by_parent = true;
                 sema_down(&p->sema);//这里进入等待
 
                 return p->exit_status;//醒了之后return退出状态
             }
-        }        
+        }    
+        node = node->next;    
     }    
     /* 找不到这个子进程，不是直接子进程，返回-1 */
     if(find == false)return -1;
@@ -272,58 +289,64 @@ int process_wait(pid_t child_pid) {
 
 /* Free the current process's resources. */
 void process_exit(void) {
-  struct thread* cur = thread_current();
-  uint32_t* pd;
+    struct thread* cur = thread_current();
+    uint32_t* pd;
 
-  /* If this thread does not have a PCB, don't worry */
-  if (cur->pcb == NULL) {
-    thread_exit();
-    NOT_REACHED();
-  }
-  
-  /* Destroy the current process's page directory and switch back
-     to the kernel-only page directory. */
-  pd = cur->pcb->pagedir;
-  if (pd != NULL) {
-    /* Correct ordering here is crucial.  We must set
-         cur->pcb->pagedir to NULL before switching page directories,
-         so that a timer interrupt can't switch back to the
-         process page directory.  We must activate the base page
-         directory before destroying the process's page
-         directory, or our active page directory will be one
-         that's been freed (and cleared).
-         正确的顺序至关重要。在切换页面目录之前，
-         我们必须将cur->pcb->pagedir 设置为 NULL，
-         这样定时器中断就无法切换回进程页面目录。
-         我们必须先激活基页面目录，然后再销毁进程的页面目录，
-         否则，我们当前活动的页面目录将是已被释放（并清空）的页面目录。 */
-    cur->pcb->pagedir = NULL;
-    pagedir_activate(NULL);
-    pagedir_destroy(pd);
-  }
+    /* If this thread does not have a PCB, don't worry */
+    if (cur->pcb == NULL) {
+      thread_exit();
+      NOT_REACHED();
+    }
+    
+    /* Destroy the current process's page directory and switch back
+      to the kernel-only page directory. */
+    pd = cur->pcb->pagedir;
+    if (pd != NULL) {
+      /* Correct ordering here is crucial.  We must set
+          cur->pcb->pagedir to NULL before switching page directories,
+          so that a timer interrupt can't switch back to the
+          process page directory.  We must activate the base page
+          directory before destroying the process's page
+          directory, or our active page directory will be one
+          that's been freed (and cleared).
+          正确的顺序至关重要。在切换页面目录之前，
+          我们必须将cur->pcb->pagedir 设置为 NULL，
+          这样定时器中断就无法切换回进程页面目录。
+          我们必须先激活基页面目录，然后再销毁进程的页面目录，
+          否则，我们当前活动的页面目录将是已被释放（并清空）的页面目录。 */
+      cur->pcb->pagedir = NULL;
+      pagedir_activate(NULL);
+      pagedir_destroy(pd);
+    }
 
-  /* Free the PCB of this process and kill this thread
-     Avoid race where PCB is freed before t->pcb is set to NULL
-     If this happens, then an unfortuantely timed timer interrupt
-     can try to activate the pagedir, but it is now freed memory */
-  struct process* pcb_to_free = cur->pcb;
+    /* Free the PCB of this process and kill this thread
+      Avoid race where PCB is freed before t->pcb is set to NULL
+      If this happens, then an unfortuantely timed timer interrupt
+      can try to activate the pagedir, but it is now freed memory */
+    struct process* pcb_to_free = cur->pcb;
 
-  struct child_process* in_parent = pcb_to_free->in_parent;
-  in_parent->alive = false;
-  //暂时让status在调用前填写
+    struct child_process* in_parent = pcb_to_free->in_parent;
+    
+    cur->pcb = NULL;
 
-  cur->pcb = NULL;
+    /* 这个进程可能没有父进程，这样in_parent是空指针 */
+    if(in_parent != NULL){
+        in_parent->alive = false;
+        //暂时让in_parent->status在调用前填写
+        struct list_elem* node = list_begin(&(pcb_to_free->child_list));
+        /* 这里出问题了,暂时不管 */
+        // while(node != NULL){
+        //     struct child_process* ch_pcb = list_entry(node,struct child_process,elem);
+        //     free(ch_pcb);
+        //     node = node->next;
+        // }
 
-  struct list_elem* node = list_begin(&(pcb_to_free->child_list));
-  while(node != NULL){
-      struct child_process* ch_pcb = list_entry(node,struct child_process,elem);
-      free(ch_pcb);
-      node = node->next;
-  }
-  /* 主线程一直睡眠到这个线程exit，才被唤醒 */
-    sema_up(&(pcb_to_free->in_parent->sema));
-    free(pcb_to_free);
-    thread_exit();
+        /* 主线程一直睡眠到这个线程exit，才被唤醒 */
+        sema_up(&(pcb_to_free->in_parent->sema));
+    }
+
+      free(pcb_to_free);
+      thread_exit();
 }
 
 /* Sets up the CPU for running user code in the current
