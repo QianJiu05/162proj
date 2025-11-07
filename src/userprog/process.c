@@ -192,7 +192,6 @@ static void start_process(void* file_name) {
                   break;
               }
           }
-
           // while(node != NULL){
           //     struct child_process* ch_pcb = list_entry(node,struct child_process,elem);
           //     if(ch_pcb->pid == t->tid){
@@ -273,31 +272,43 @@ int process_wait(pid_t child_pid) {
         printf("empty list\n");
         return -1;
     }
-    bool find = false;
     for(struct list_elem* e = list_begin(child); e != list_end(child); e = list_next(e))
     {
         struct child_process *p = list_entry(e,struct child_process,elem);
         if(child_pid == p->pid){
-            find = true;
             printf("pid:%d\n",child_pid);
             /* 已经死了，不能再等待了 */
+            // if(p->alive == false){
+            //     return p->exit_status;
+            // }
             if(p->alive == false){
-                return p->exit_status;
+                int status = p->exit_status;
+                //把这个节点从链表中删除
+                list_remove(e);
+                free(p);
+                return status;
             }
+
             /* 已经被等待的不能再被等待，立刻return-1 */
             if(p->wait_by_parent == true){
                 return -1;
             }else{
                 /* 没死&没被等待，进入等待 */
                 p->wait_by_parent = true;
+                printf("enter sleep\n");
                 sema_down(&p->sema);//这里进入等待
 
-                return p->exit_status;//醒了之后return退出状态
+                /* 醒来后，获取退出状态并清理 */
+                int status = p->exit_status;
+                list_remove(e);
+                free(p);
+                return status;
+                // return p->exit_status;//醒了之后return退出状态
             }
         }    
     }    
     /* 找不到这个子进程，不是直接子进程，返回-1 */
-    if(find == false)return -1;
+    return -1;
 }
 
 /* Free the current process's resources. */
@@ -342,18 +353,19 @@ void process_exit(void) {
     
     cur->pcb = NULL;
 
+    /* 清除该PCB的child_list */
+    while (!list_empty(&pcb_to_free->child_list)) {
+        struct list_elem* e = list_pop_front(&pcb_to_free->child_list);
+        struct child_process* child = list_entry(e, struct child_process, elem);
+        free(child);
+    }
     /* 这个进程可能没有父进程，这样in_parent是空指针 */
     if(in_parent != NULL){
         in_parent->alive = false;
         //暂时让in_parent->status在调用前填写
 
-        /* 清除该PCB的child_list */
-        while (!list_empty(&pcb_to_free->child_list)) {
-            struct list_elem* e = list_pop_front(&pcb_to_free->child_list);
-            struct child_process* child = list_entry(e, struct child_process, elem);
-            free(child);
-        }
         /* 主线程一直睡眠到这个进程exit，才被唤醒 */
+        printf("wake up parent\n");
         sema_up(&(pcb_to_free->in_parent->sema));
     }
 
