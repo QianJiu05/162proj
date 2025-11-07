@@ -141,7 +141,6 @@ pid_t process_execute(const char* file_name) {
            不论是否成功，然后初始化child_PCB并返回tid */
         sema_down(&temporary);
         if(child->alive == false){return TID_ERROR;}
-
     }
     return tid;
 }
@@ -275,8 +274,9 @@ int process_wait(pid_t child_pid) {
         return -1;
     }
     bool find = false;
-    while(node->next != NULL){
-        struct child_process *p = list_entry(node,struct child_process,elem);
+    for(struct list_elem* e = list_begin(child); e != list_end(child); e = list_next(e))
+    {
+        struct child_process *p = list_entry(e,struct child_process,elem);
         if(child_pid == p->pid){
             find = true;
             printf("pid:%d\n",child_pid);
@@ -295,7 +295,6 @@ int process_wait(pid_t child_pid) {
                 return p->exit_status;//醒了之后return退出状态
             }
         }    
-        node = node->next;    
     }    
     /* 找不到这个子进程，不是直接子进程，返回-1 */
     if(find == false)return -1;
