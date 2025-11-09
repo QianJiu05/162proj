@@ -33,7 +33,9 @@ char* copy_string_across_boundary(const char* src) {
 /* Returns an address that is invalid, but the preceding bytes
  * are all valid (the highest address in the bss segment). Used
  * to position information such that the first byte of the
- * information is valid, but not all the information is valid. */
+ * information is valid, but not all the information is valid.
+ * 返回一个无效地址，但其前面的字节全部有效（bss 段中的最高地址）。
+ * 用于定位信息，使得信息的第一个字节有效，但并非所有信息都有效。 */
 void* get_bad_boundary(void) {
   /* This code assumes that dst will be in the highest page
    * allocated to the user process. */

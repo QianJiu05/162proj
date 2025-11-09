@@ -21,9 +21,10 @@ typedef void (*stub_fun)(pthread_fun, void*);
 
 struct child_process{
    pid_t pid;
+   bool create_success;    /* 是否成功创建 */
    bool wait_by_parent;    /* 已被等待 */
    bool alive;             /* 是否还存活 */
-   int exit_status;
+   int exit_status;        /* 退出状态 */
    struct list_elem elem;  /* 挂在父进程的child_list */
    struct semaphore sema;  /* 用于等待 */
 };

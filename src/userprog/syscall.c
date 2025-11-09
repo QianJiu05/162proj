@@ -57,12 +57,12 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
             
         case SYS_EXIT:
             check_valid_num(&args[1]);
-            // f->eax = args[1];exit不应该有返回值
             syscall_exit(args[1]);
             break;
         
         case SYS_EXEC:
             check_valid_str((char*)args[1]);
+            
             f->eax = syscall_exec((char*)args[1]);
             break;
         
