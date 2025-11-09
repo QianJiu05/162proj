@@ -94,7 +94,8 @@ static void check_valid_num(uint32_t* num){
 
     if(num == NULL || pagedir_get_page(t->pcb->pagedir,num) == NULL)
     {//pgdir_getpage已经检查了是否在uaddr
-        process_exit();
+        // process_exit();
+        syscall_exit(-1);
     }
     void* this_byte = (void*)num;
     for(int i = 1; i <= 3; i++){
@@ -110,7 +111,6 @@ static void check_valid_str(const char* str){
     struct thread *t = thread_current();
     if(str == NULL){
         printf("null str ptr\n");
-        // process_exit();
         syscall_exit(-1);
     }
     if(pagedir_get_page(t->pcb->pagedir,str) == NULL){
