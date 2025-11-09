@@ -41,11 +41,9 @@ struct process {
    char process_name[16];      /* Name of the main thread */
    struct thread* main_thread; /* Pointer to main thread */
 
-   //sema
    struct list child_list;     /* 子进程pid链表 */
    struct child_process* in_parent;  /* 自己在父进程的节点 */
-
-   int exit_status;
+   // int exit_status;
 };
 
 struct pass_args{

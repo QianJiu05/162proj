@@ -40,14 +40,15 @@ static int syscall_write(int fd, void* buffer, size_t size){
     }
     return ret;
 }
+static pid_t syscall_fork(void){
+
+}
 //arg[0]是调用号，其余是参数
 static void syscall_handler(struct intr_frame* f UNUSED) {
-    //The caller’s stack pointer is accessible to syscall_handler as the esp member of the struct intr_frame passed to it
     //调用者的堆栈指针可以通过传递给它的 struct intr_frame 的 esp 成员访问。指针数组
     uint32_t *args = ((uint32_t*)f->esp);//32bit width
 
     //   printf("arg0 = %d, arg2 = %s\n",args[0],(char*)args[2]);
-
     check_valid_num(&args[0]);//检查栈顶指针是否有问题
 
     switch(args[0]){
@@ -106,11 +107,13 @@ static void check_valid_num(uint32_t* num){
     }
 }
 static void check_valid_str(const char* str){
-    // printf("checking str\n");
     struct thread *t = thread_current();
     if(str == NULL){
         printf("null str ptr\n");
         // process_exit();
+        syscall_exit(-1);
+    }
+    if(pagedir_get_page(t->pcb->pagedir,str) == NULL){
         syscall_exit(-1);
     }
 

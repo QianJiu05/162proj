@@ -50,7 +50,7 @@ void userprog_init(void) {
         t->pcb->in_parent = NULL;
         t->pcb->main_thread = t;
         t->pcb->pagedir = NULL;
-        t->pcb->exit_status = 0;
+        // t->pcb->exit_status = 0;
     }
     /* Kill the kernel if we did not succeed */
     ASSERT(success);
