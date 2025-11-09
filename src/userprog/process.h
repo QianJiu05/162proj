@@ -4,6 +4,7 @@
 #include "threads/thread.h"
 #include <stdint.h>
 
+#include "filesys/directory.h"
 // At most 8MB can be allocated to the stack
 // These defines will be used in Project 2: Multithreading
 #define MAX_STACK_PAGES (1 << 11)
@@ -30,19 +31,27 @@ struct child_process{
 };
 
 #define MAX_FD_NUM 128
-
-/* The process control block for a given process. Since
-   there can be multiple threads per process, we need a separate
-   PCB from the TCB. All TCBs in a process will have a pointer
-   to the PCB, and the PCB will have a pointer to the main thread
-   of the process, which is `special`. */
+struct file_descriptor{
+      int flag;                     /* 控制模式 */
+      char name[NAME_MAX];          /* 文件名字 */
+      struct file* file_ptr;        /* 文件指针 */
+};
+struct file_descript_table{
+      int used_num;                 /* 已使用的数量 */    
+      struct file_descriptor fd[MAX_FD_NUM];  /* 文件描述符数组 */
+      bool using[MAX_FD_NUM];       /* 文件指针对应的索引 */
+};
+/* 给定进程的进程控制块。由于每个进程可以有多个线程，
+   我们需要一个独立于线程控制块 (TCB) 的进程控制块 (PCB)。
+   进程中的所有 TCB 都将持有指向 PCB 的指针，
+   而 PCB 又持有指向进程主线程的指针，主线程是“特殊的”。 */
 struct process {
    /* Owned by process.c. */
    uint32_t* pagedir;          /* Page directory. */
    char process_name[16];      /* Name of the main thread */
    struct thread* main_thread; /* Pointer to main thread */
 
-   uint16_t fd[MAX_FD_NUM];    /* 文件描述符 */
+   struct file_descript_table fdt;    /* 文件描述符 */
 
    struct list child_list;     /* 子进程pid链表 */
    struct child_process* in_parent;  /* 自己在父进程的节点 */

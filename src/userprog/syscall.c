@@ -33,6 +33,26 @@ static bool syscall_create(const char *file, unsigned initial_size){
     bool success = filesys_create(file,initial_size);
     return success;
 }
+static bool syscall_remove(const char *file){
+    bool success = filesys_remove(file);
+    return success;
+}
+static int syscall_open(const char *file){
+    struct file* ptr = NULL;
+    ptr = filesys_open(file);
+    if(ptr == NULL){
+        return -1;
+    }
+    //应该从pcb的fd进行对比，找到在不在，然后更新
+    struct file_descript_table* entry = &(thread_current()->pcb->fdt);
+    struct file_descriptor* fd = entry->fd;
+    // for(int i = 0,cnt = 0; i < MAX_FD_NUM || cnt == fd->used_num; i++){
+    //     if(fd[i])
+    // }
+
+    
+}
+
 static uint32_t syscall_wait(pid_t pid){
     return process_wait(pid);
 }
@@ -79,6 +99,16 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
             check_valid_num(&args[2]);
             f->eax = syscall_create((char*)args[1],args[2]);
             break;
+        
+        case SYS_REMOVE:
+            check_valid_str((char*)args[1]);
+            f->eax = syscall_remove((char*)args[1]);
+            break;
+        
+        case SYS_OPEN:
+            check_valid_str((char*)args[1]);
+            f->eax = syscall_open((char*)args[1]);
+            break;
 
         case SYS_WRITE:
             check_valid_num(&args[1]);
@@ -86,6 +116,8 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
             check_valid_buffer((void*)args[2],args[3]);
             f->eax = syscall_write((int)args[1],(void*)args[2],(size_t)args[3]);
             break;
+        
+
 
         case SYS_PRACTICE:
             check_valid_num(&args[1]);
