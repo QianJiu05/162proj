@@ -23,11 +23,9 @@ static void syscall_exit(int status){
     if (cur->pcb->in_parent != NULL) {
         cur->pcb->in_parent->exit_status = status;
     }
-    process_exit();
-    return status;
+    process_exit();//程序运行到这里就结束了，不会有返回值
 }
 static uint32_t syscall_exec(const char* file_name){
-    // const char* file_name = (char*)args[1];
     int exec_pid = process_execute(file_name);
     return exec_pid;
 }
@@ -49,11 +47,8 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
     uint32_t *args = ((uint32_t*)f->esp);//32bit width
 
     //   printf("arg0 = %d, arg2 = %s\n",args[0],(char*)args[2]);
-    // printf("args[0] = %d\n",&args[0]);
-
 
     check_valid_num(&args[0]);//检查栈顶指针是否有问题
-
 
     switch(args[0]){
         case SYS_HALT:
@@ -62,7 +57,7 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
             
         case SYS_EXIT:
             check_valid_num(&args[1]);
-            f->eax = args[1];
+            // f->eax = args[1];exit不应该有返回值
             syscall_exit(args[1]);
             break;
         
@@ -111,7 +106,7 @@ static void check_valid_num(uint32_t* num){
     }
 }
 static void check_valid_str(const char* str){
-    printf("checking str\n");
+    // printf("checking str\n");
     struct thread *t = thread_current();
     if(str == NULL){
         printf("null str ptr\n");
@@ -120,13 +115,18 @@ static void check_valid_str(const char* str){
     }
 
     char* p = str;
-    while(*p != '\0'){
+    int cnt = 0;
+    while(*p != '\0' && cnt < 1024){
         if(pagedir_get_page(t->pcb->pagedir,p) == NULL){
             printf("bad string\n");
             // process_exit();
             syscall_exit(-1);
         }
         p++;
+        cnt++;
+    }
+    if(cnt >= 1024){
+        syscall_exit(-1);
     }
 }
 static void check_valid_buffer(const void* buffer, size_t size){
