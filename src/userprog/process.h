@@ -28,7 +28,8 @@ struct child_process{
    struct list_elem elem;  /* 挂在父进程的child_list */
    struct semaphore sema;  /* 用于等待 */
 };
-#define MAX_FD 128
+
+#define MAX_FD_NUM 128
 
 /* The process control block for a given process. Since
    there can be multiple threads per process, we need a separate
@@ -41,9 +42,11 @@ struct process {
    char process_name[16];      /* Name of the main thread */
    struct thread* main_thread; /* Pointer to main thread */
 
+   uint16_t fd[MAX_FD_NUM];    /* 文件描述符 */
+
    struct list child_list;     /* 子进程pid链表 */
    struct child_process* in_parent;  /* 自己在父进程的节点 */
-   // int exit_status;
+
 };
 
 struct pass_args{

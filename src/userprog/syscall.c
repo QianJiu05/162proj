@@ -29,6 +29,10 @@ static uint32_t syscall_exec(const char* file_name){
     int exec_pid = process_execute(file_name);
     return exec_pid;
 }
+static bool syscall_create(const char *file, unsigned initial_size){
+    bool success = filesys_create(file,initial_size);
+    return success;
+}
 static uint32_t syscall_wait(pid_t pid){
     return process_wait(pid);
 }
@@ -40,9 +44,8 @@ static int syscall_write(int fd, void* buffer, size_t size){
     }
     return ret;
 }
-static pid_t syscall_fork(void){
-
-}
+// static pid_t syscall_fork(void){
+// }
 //arg[0]是调用号，其余是参数
 static void syscall_handler(struct intr_frame* f UNUSED) {
     //调用者的堆栈指针可以通过传递给它的 struct intr_frame 的 esp 成员访问。指针数组
@@ -63,13 +66,18 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
         
         case SYS_EXEC:
             check_valid_str((char*)args[1]);
-            
             f->eax = syscall_exec((char*)args[1]);
             break;
         
         case SYS_WAIT:
             check_valid_num(&args[1]);
             f->eax = syscall_wait(args[1]);
+            break;
+        
+        case SYS_CREATE:
+            check_valid_str((char*)args[1]);
+            check_valid_num(&args[2]);
+            f->eax = syscall_create((char*)args[1],args[2]);
             break;
 
         case SYS_WRITE:
@@ -85,6 +93,9 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
             break;
 
         // case SYS_FORK:
+        //     f->eax = syscall_fork();
+        //     break;
+
     }
 }
 
@@ -94,7 +105,6 @@ static void check_valid_num(uint32_t* num){
 
     if(num == NULL || pagedir_get_page(t->pcb->pagedir,num) == NULL)
     {//pgdir_getpage已经检查了是否在uaddr
-        // process_exit();
         syscall_exit(-1);
     }
     void* this_byte = (void*)num;
@@ -102,7 +112,6 @@ static void check_valid_num(uint32_t* num){
         this_byte = (void*)((char*)this_byte + i);
         if(num == NULL || pagedir_get_page(t->pcb->pagedir,this_byte) == NULL)
         {//pgdir_getpage已经检查了是否在uaddr
-            // process_exit();
             syscall_exit(-1);
         }
     }
@@ -110,7 +119,7 @@ static void check_valid_num(uint32_t* num){
 static void check_valid_str(const char* str){
     struct thread *t = thread_current();
     if(str == NULL){
-        printf("null str ptr\n");
+        // printf("null str ptr\n");
         syscall_exit(-1);
     }
     if(pagedir_get_page(t->pcb->pagedir,str) == NULL){
