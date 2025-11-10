@@ -50,6 +50,7 @@ void userprog_init(void) {
         t->pcb->in_parent = NULL;
         t->pcb->main_thread = t;
         t->pcb->pagedir = NULL;
+        memset(&t->pcb->fdt,0,sizeof(t->pcb->fdt));
     }
     /* Kill the kernel if we did not succeed */
     ASSERT(success);
@@ -175,6 +176,8 @@ static void start_process(void* file_name) {
       strlcpy(t->pcb->process_name, t->name, sizeof t->name);
 
       list_init(&(t->pcb->child_list));
+      memset(&t->pcb->fdt,0,sizeof(t->pcb->fdt));
+
       t->pcb->in_parent = NULL;
       
       struct thread* parent_thread = t->parent;

@@ -7,6 +7,9 @@
 #include "userprog/process.h"
 #include "userprog/pagedir.h"
 
+#include <string.h>
+#include "filesys/filesys.h"
+
 static void syscall_handler(struct intr_frame*);
 
 static void check_valid_num(uint32_t* args);
@@ -45,12 +48,31 @@ static int syscall_open(const char *file){
     }
     //应该从pcb的fd进行对比，找到在不在，然后更新
     struct file_descript_table* entry = &(thread_current()->pcb->fdt);
-    struct file_descriptor* fd = entry->fd;
-    // for(int i = 0,cnt = 0; i < MAX_FD_NUM || cnt == fd->used_num; i++){
-    //     if(fd[i])
-    // }
-
     
+    int16_t idx_unused = -1;
+    /* 不需要管0(标准输入)，1(标准输出)，2(标准错误) */
+    for(size_t i = 3; i < MAX_FD_NUM; i++){
+        /* 先判断有没有在使用 */
+        if(entry->using[i] == true){
+            if(ptr == entry->fd[i].file_ptr){
+                return i;
+            }
+        }else{
+            if(idx_unused == -1){
+                idx_unused = i;
+            }
+        }
+    }
+    /* 没有return，没找到对应的 */
+    if(idx_unused == -1){
+        return -1;
+    }
+    /* 没满 */
+    entry->using[idx_unused] = true;
+    entry->fd[idx_unused].file_ptr = ptr;
+    strlcpy(entry->fd[idx_unused].name,file,sizeof(entry->fd[idx_unused].name));
+    return idx_unused;
+
 }
 
 static uint32_t syscall_wait(pid_t pid){

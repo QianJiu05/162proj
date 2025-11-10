@@ -37,7 +37,6 @@ struct file_descriptor{
       struct file* file_ptr;        /* 文件指针 */
 };
 struct file_descript_table{
-      int used_num;                 /* 已使用的数量 */    
       struct file_descriptor fd[MAX_FD_NUM];  /* 文件描述符数组 */
       bool using[MAX_FD_NUM];       /* 文件指针对应的索引 */
 };
