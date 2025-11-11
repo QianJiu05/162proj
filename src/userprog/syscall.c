@@ -9,6 +9,8 @@
 
 #include <string.h>
 #include "filesys/filesys.h"
+#include "filesys/file.h"
+#include "devices/input.h"
 
 static void syscall_handler(struct intr_frame*);
 
@@ -74,17 +76,79 @@ static int syscall_open(const char *file){
     return idx_unused;
 
 }
+static int syscall_filesize(int fd){
+    struct process* p = thread_current()->pcb;
+    /* 检查是否在使用 */
+    if(p->fdt.using[fd] == false){
+        return -1;
+    }
+    int size = file_length(p->fdt.fd[fd].file_ptr);
+    return size;
+}
+static int syscall_read(int fd, void* buffer, unsigned size){
+    /* 范围检查 */
+    if(fd < 0 || fd >= MAX_FD_NUM){
+        return -1;
+    }
 
+    struct process* p = thread_current()->pcb;
+    /* 检查是否存在 */
+    if(p->fdt.using[fd] == false){
+        return -1;
+    }
+    /* 从文件中读取 */
+    int cur_read = 0;
+    if(fd > 2){
+        cur_read = file_read(p->fdt.fd[fd].file_ptr,buffer,size);
+        return cur_read;
+    }
+    /* 从标准输入读取 */
+    if(fd == STDIN_FILENO){
+        while((unsigned)cur_read < size){
+            ((char*)buffer)[cur_read++] = input_getc();
+        }
+        /* 从0开始计数，直接返回cur即可 */
+        return cur_read;
+    }
+}
 static uint32_t syscall_wait(pid_t pid){
     return process_wait(pid);
 }
 static int syscall_write(int fd, void* buffer, size_t size){
-    int ret = -1;
-    if(fd == STDOUT_FILENO){
-        putbuf(buffer,size);
-        ret = 0;
+    /* 范围检查 */
+    if(fd < 0 || fd >= MAX_FD_NUM || fd == STDIN_FILENO){
+        return -1;
     }
-    return ret;
+
+    if(fd == STDOUT_FILENO){
+        int cur_size = 0;
+        if(size > 512){
+            while(cur_size < size){
+                if(size - cur_size > 512){
+                    putbuf(buffer,512);
+                    cur_size += 512;
+                    buffer = (char*)buffer + 512;
+                }else{
+                    int less = size - cur_size;
+                    putbuf(buffer,less);
+                    cur_size += less;
+                }
+            }
+            return cur_size;
+
+        }else{
+            putbuf(buffer,size);
+        }
+        return size;
+    }
+
+    if(fd > 2){
+        struct process* p = thread_current()->pcb;
+        if(p->fdt.using[fd] == false){
+            return -1;
+        }
+        return file_write(p->fdt.fd[fd].file_ptr,buffer,size);
+    }
 }
 // static pid_t syscall_fork(void){
 // }
@@ -132,6 +196,18 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
             f->eax = syscall_open((char*)args[1]);
             break;
 
+        case SYS_FILESIZE:
+            check_valid_num(&args[1]);
+            f->eax = syscall_filesize(args[1]);
+            break;
+        
+        case SYS_READ:
+            check_valid_num(&args[1]);
+            check_valid_num(&args[3]);
+            check_valid_buffer((void*)args[2],args[3]);
+            f->eax = syscall_read(args[1],(void*)args[2],args[3]);
+            break;
+
         case SYS_WRITE:
             check_valid_num(&args[1]);
             check_valid_num(&args[3]);
@@ -173,7 +249,6 @@ static void check_valid_num(uint32_t* num){
 static void check_valid_str(const char* str){
     struct thread *t = thread_current();
     if(str == NULL){
-        // printf("null str ptr\n");
         syscall_exit(-1);
     }
     if(pagedir_get_page(t->pcb->pagedir,str) == NULL){
@@ -184,8 +259,6 @@ static void check_valid_str(const char* str){
     int cnt = 0;
     while(*p != '\0' && cnt < 1024){
         if(pagedir_get_page(t->pcb->pagedir,p) == NULL){
-            printf("bad string\n");
-            // process_exit();
             syscall_exit(-1);
         }
         p++;
@@ -197,8 +270,6 @@ static void check_valid_str(const char* str){
 }
 static void check_valid_buffer(const void* buffer, size_t size){
     if(buffer == NULL){
-        // printf("empty ptr\n");
-        // process_exit();
         syscall_exit(-1);
     }
 
@@ -207,7 +278,6 @@ static void check_valid_buffer(const void* buffer, size_t size){
     struct thread *t = thread_current();
 
     if(pagedir_get_page(t->pcb->pagedir,buffer) == NULL){
-        // printf("bad buffer\n");
         syscall_exit(-1);
     }
 
@@ -226,5 +296,3 @@ static void check_valid_buffer(const void* buffer, size_t size){
         }
     }    
 }
-
-
