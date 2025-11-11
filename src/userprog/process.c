@@ -325,6 +325,8 @@ void process_exit(void) {
       can try to activate the pagedir, but it is now freed memory */
     struct process* pcb_to_free = cur->pcb;
     struct child_process* in_parent = pcb_to_free->in_parent;
+
+    file_allow_write(pcb_to_free->elf);
     
     cur->pcb = NULL;
 
@@ -434,7 +436,6 @@ static bool load_segment(struct file* file, off_t ofs, uint8_t* upage, uint32_t 
 // bool load(const char* file_name, void (**eip)(void), void** esp) 
 bool load(struct pass_args* arg, void (**eip)(void), void** esp) {
 
-  // const char* file_name = arg->file_name;
   const char* file_name = arg->argv[0];
 
   struct thread* t = thread_current();
@@ -456,6 +457,8 @@ bool load(struct pass_args* arg, void (**eip)(void), void** esp) {
     printf("load: %s: open failed\n", file_name);
     goto done;
   }
+  file_deny_write(file);
+  t->pcb->elf = file;
 
   /* Read and verify executable header. */
   if (file_read(file, &ehdr, sizeof ehdr) != sizeof ehdr ||
@@ -580,6 +583,8 @@ bool load(struct pass_args* arg, void (**eip)(void), void** esp) {
     // hex_dump(0, *esp, 128, true);
 
     success = true;
+
+    return success;
 
 done:
   /* We arrive here whether the load is successful or not. */

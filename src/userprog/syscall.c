@@ -12,11 +12,14 @@
 #include "filesys/file.h"
 #include "devices/input.h"
 
+struct semaphore global;
+bool sema_is_init = false;
 static void syscall_handler(struct intr_frame*);
 
 static void check_valid_num(uint32_t* args);
 static void check_valid_str(const char* str);
 static void check_valid_buffer(const void* buffer, size_t size);
+
 
 void syscall_init(void) { intr_register_int(0x30, 3, INTR_ON, syscall_handler, "syscall"); }
 
@@ -99,7 +102,9 @@ static int syscall_read(int fd, void* buffer, unsigned size){
     /* 从文件中读取 */
     int cur_read = 0;
     if(fd > 2){
+        sema_down(&global);
         cur_read = file_read(p->fdt.fd[fd].file_ptr,buffer,size);
+        sema_up(&global);
         return cur_read;
     }
     /* 从标准输入读取 */
@@ -121,25 +126,24 @@ static int syscall_write(int fd, void* buffer, size_t size){
     }
 
     if(fd == STDOUT_FILENO){
-        int cur_size = 0;
-        if(size > 512){
-            while(cur_size < size){
-                if(size - cur_size > 512){
-                    putbuf(buffer,512);
-                    cur_size += 512;
-                    buffer = (char*)buffer + 512;
-                }else{
-                    int less = size - cur_size;
-                    putbuf(buffer,less);
-                    cur_size += less;
-                }
-            }
-            return cur_size;
-
-        }else{
+        if(size <= 512){
             putbuf(buffer,size);
+            return size;
         }
-        return size;
+        /* 太长的要拆分成多个块 */
+        int cur_size = 0;
+        while(cur_size < size){
+            if(size - cur_size > 512){
+                putbuf(buffer,512);
+                cur_size += 512;
+                buffer = (char*)buffer + 512;
+            }else{
+                int less = size - cur_size;
+                putbuf(buffer,less);
+                cur_size += less;
+            }
+        }
+        return cur_size; 
     }
 
     if(fd > 2){
@@ -147,7 +151,10 @@ static int syscall_write(int fd, void* buffer, size_t size){
         if(p->fdt.using[fd] == false){
             return -1;
         }
-        return file_write(p->fdt.fd[fd].file_ptr,buffer,size);
+        sema_down(&global);
+        int ret = file_write(p->fdt.fd[fd].file_ptr,buffer,size);
+        sema_up(&global);
+        return ret;
     }
 }
 static void syscall_seek(int fd,unsigned position){
@@ -158,8 +165,9 @@ static void syscall_seek(int fd,unsigned position){
         if(p->fdt.using[fd] == false){
             return ;
         }
-    
+    sema_down(&global);
     file_seek(p->fdt.fd[fd].file_ptr,position);
+    sema_up(&global);
 }
 static int syscall_tell(int fd){
     if(fd <= 2 || fd >= MAX_FD_NUM){
@@ -169,7 +177,10 @@ static int syscall_tell(int fd){
         if(p->fdt.using[fd] == false){
             return ;
         }
-    return file_tell(p->fdt.fd[fd].file_ptr);
+    sema_up(&global);
+    int ret = file_tell(p->fdt.fd[fd].file_ptr);
+    sema_down(&global);
+    return ret;
 }
 static void syscall_close(int fd){
     if(fd <= 2 || fd >= MAX_FD_NUM){
@@ -177,7 +188,9 @@ static void syscall_close(int fd){
     }
     struct process* p = thread_current()->pcb;
     if(p->fdt.using[fd] == true){
+        sema_down(&global);
         file_close(p->fdt.fd[fd].file_ptr);
+        sema_up(&global);
         p->fdt.using[fd] = false;
         p->fdt.fd[fd].file_ptr = NULL;
     }
@@ -188,6 +201,11 @@ static void syscall_close(int fd){
 static void syscall_handler(struct intr_frame* f UNUSED) {
     //调用者的堆栈指针可以通过传递给它的 struct intr_frame 的 esp 成员访问。指针数组
     uint32_t *args = ((uint32_t*)f->esp);//32bit width
+
+    if(sema_is_init == false){
+        sema_init(&global,1);
+        sema_is_init = true;
+    }
 
     //   printf("arg0 = %d, arg2 = %s\n",args[0],(char*)args[2]);
     check_valid_num(&args[0]);//检查栈顶指针是否有问题
