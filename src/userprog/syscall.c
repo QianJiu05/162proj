@@ -150,6 +150,38 @@ static int syscall_write(int fd, void* buffer, size_t size){
         return file_write(p->fdt.fd[fd].file_ptr,buffer,size);
     }
 }
+static void syscall_seek(int fd,unsigned position){
+    if(fd <= 2 || fd >= MAX_FD_NUM){
+        return;
+    }
+    struct process* p = thread_current()->pcb;
+        if(p->fdt.using[fd] == false){
+            return ;
+        }
+    
+    file_seek(p->fdt.fd[fd].file_ptr,position);
+}
+static int syscall_tell(int fd){
+    if(fd <= 2 || fd >= MAX_FD_NUM){
+        return;
+    }
+    struct process* p = thread_current()->pcb;
+        if(p->fdt.using[fd] == false){
+            return ;
+        }
+    return file_tell(p->fdt.fd[fd].file_ptr);
+}
+static void syscall_close(int fd){
+    if(fd <= 2 || fd >= MAX_FD_NUM){
+        return;
+    }
+    struct process* p = thread_current()->pcb;
+    if(p->fdt.using[fd] == true){
+        file_close(p->fdt.fd[fd].file_ptr);
+        p->fdt.using[fd] = false;
+        p->fdt.fd[fd].file_ptr = NULL;
+    }
+}
 // static pid_t syscall_fork(void){
 // }
 //arg[0]是调用号，其余是参数
@@ -214,9 +246,23 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
             check_valid_buffer((void*)args[2],args[3]);
             f->eax = syscall_write((int)args[1],(void*)args[2],(size_t)args[3]);
             break;
+
+        case SYS_SEEK:
+            check_valid_num(&args[1]);
+            check_valid_num(&args[2]);
+            syscall_seek(args[1],args[2]);
+            break;
+
+        case SYS_TELL:
+            check_valid_num(&args[1]);
+            f->eax = syscall_tell(args[1]);
+            break;
+
+        case SYS_CLOSE:
+            check_valid_num(&args[1]);
+            syscall_close(args[1]);
+            break;
         
-
-
         case SYS_PRACTICE:
             check_valid_num(&args[1]);
             f->eax = args[1] + 1;
