@@ -124,7 +124,10 @@ bool pagedir_set_page(uint32_t* pd, void* upage, void* kpage, bool writable) {
 void* pagedir_get_page(uint32_t* pd, const void* uaddr) {
   uint32_t* pte;
 
-  ASSERT(is_user_vaddr(uaddr));
+  // ASSERT(is_user_vaddr(uaddr));
+  if(!is_user_vaddr(uaddr)){
+      return NULL;
+  }
 
   pte = lookup_page(pd, uaddr, false);
   if (pte != NULL && (*pte & PTE_P) != 0)
