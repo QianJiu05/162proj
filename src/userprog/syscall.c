@@ -195,8 +195,13 @@ static void syscall_close(int fd){
         p->fdt.fd[fd].file_ptr = NULL;
     }
 }
-// static pid_t syscall_fork(void){
-// }
+static pid_t syscall_fork(struct intr_frame* f){
+    struct thread* t = thread_current();
+    
+    /* 保存父进程的寄存器状态，用于模拟中断 */
+    t->pcb->saved_if = *f;
+    return process_fork();
+}
 //arg[0]是调用号，其余是参数
 static void syscall_handler(struct intr_frame* f UNUSED) {
     //调用者的堆栈指针可以通过传递给它的 struct intr_frame 的 esp 成员访问。指针数组
@@ -286,9 +291,9 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
             f->eax = args[1] + 1;
             break;
 
-        // case SYS_FORK:
-        //     f->eax = syscall_fork();
-        //     break;
+        case SYS_FORK:
+            f->eax = syscall_fork(f);
+            break;
 
     }
 }

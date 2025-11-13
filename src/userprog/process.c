@@ -20,12 +20,13 @@
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 
-/* 父进程必须先确认子进程是否成功加载了其可执行文件，才能从 exec 调用中返回。
-  您必须使用适当的同步机制来确保这一点。*/
 static thread_func start_process NO_RETURN;
 static thread_func start_pthread NO_RETURN;
 bool load(struct pass_args* arg, void (**eip)(void), void** esp);
 bool setup_thread(void (**eip)(void), void** esp);
+
+static bool copy_memory(uint32_t* parent,uint32_t* child);
+static void start_fork_process(void);
 
 /* 通过确保主线程拥有最小的程序控制块 (PCB) 来初始化系统中的用户程序，
    以便它能够执行并等待第一个用户进程。如果主线程需要这些成员，
@@ -183,7 +184,7 @@ static void start_process(void* file_name) {
       struct thread* parent_thread = t->parent;
       if(parent_thread != NULL && parent_thread->pcb != NULL){
           for(struct list_elem *e = list_begin(&(parent_thread->pcb->child_list));
-                  e != list_end(&(parent_thread->pcb->child_list));//???????
+                  e != list_end(&(parent_thread->pcb->child_list));
                   e = list_next(e))
           {
               struct child_process* ch_pcb = list_entry(e,struct child_process,elem);
@@ -234,12 +235,10 @@ static void start_process(void* file_name) {
 
     sema_up(&local_in_parent->sema);//加载成功也要释放信号量
 
-    /* Start the user process by simulating a return from an
-      interrupt, implemented by intr_exit (in
-      threads/intr-stubs.S).  Because intr_exit takes all of its
-      arguments on the stack in the form of a `struct intr_frame',
-      we just point the stack pointer (%esp) to our stack frame
-      and jump to it. */
+    /* 通过模拟中断返回来启动用户进程，
+    中断由 intr_exit 实现（位于threads/intr-stubs.S 中）。
+    由于 intr_exit 的所有参数都以 `struct intr_frame` 的形式放在栈上，
+    因此我们只需将栈指针 (%esp) 指向栈帧，然后跳转到该栈帧即可。 */
     asm volatile("movl %0, %%esp; jmp intr_exit" : : "g"(&if_) : "memory");
     NOT_REACHED();
 }
@@ -338,13 +337,138 @@ void process_exit(void) {
     }
     /* 这个进程可能没有父进程，只有在非空时才能访问 */
     if(in_parent != NULL){
-      //exit_status在syscall里直接填写了
+      //exit_status在syscall里填写了
         in_parent->alive = false;
         /* 主线程一直睡眠到这个进程exit，才被唤醒 */
         sema_up(&(in_parent->sema));
     }
       free(pcb_to_free);
       thread_exit();
+}
+
+pid_t process_fork(void){
+    struct thread *t = thread_current();
+
+    char child_name[16];
+    size_t len = strlen(t->pcb->process_name);
+    memcpy(child_name,t->pcb->process_name,sizeof(char)*len);
+    if(len < 13){
+        child_name[len] = '-';
+        child_name[len+1] = 'c';
+        child_name[len+2] = '\0';
+    }else{
+        child_name[13] = '-';
+        child_name[14] = 'c';
+        child_name[15] = '\0';
+    }
+
+    tid_t tid = thread_create(child_name,PRI_DEFAULT,start_fork_process,NULL);
+    if(tid == TID_ERROR){
+        return TID_ERROR;
+    }
+
+    struct child_process *child = malloc(sizeof(struct child_process));
+    if(child == NULL){
+        return TID_ERROR;
+    }
+    child->pid = tid;
+    child->wait_by_parent = false;
+    child->alive = false;
+    child->create_success = false;
+    child->exit_status = -1;
+    sema_init(&(child->sema),0);
+    list_push_back(&(t->pcb->child_list),&(child->elem));
+
+    /* 让父进程进入等待，创建子进程后唤醒父进程，
+        不论是否成功，然后初始化child_PCB并返回tid */
+    sema_down(&child->sema);
+    //这里醒了，然后判断是不是true
+    if(child->create_success == false){
+        list_remove(&child->elem);
+        free(child);
+        return TID_ERROR;
+    }
+    return tid;
+}
+static void start_fork_process(void){
+    struct thread* t = thread_current();
+
+    struct process* new_pcb = malloc(sizeof(struct process));
+    bool success = false;
+
+    t->pcb = new_pcb;
+    t->pcb->pagedir = pagedir_create();
+    if(t->pcb->pagedir == NULL){
+        goto fail;
+    }
+    t->pcb->main_thread = t;
+    memcpy(t->pcb->process_name,t->name,sizeof(t->pcb->process_name));
+    list_init(&(t->pcb->child_list));
+    memcpy(&t->pcb->fdt,&t->parent->pcb->fdt,sizeof(t->pcb->fdt));
+
+    /* 建立与父进程的连接 */
+    t->pcb->in_parent = NULL;
+    struct thread* parent_thread = t->parent;
+    if(parent_thread != NULL && parent_thread->pcb != NULL){
+        for(struct list_elem *e = list_begin(&(parent_thread->pcb->child_list));
+                e != list_end(&(parent_thread->pcb->child_list));
+                e = list_next(e))
+        {
+            struct child_process* ch_pcb = list_entry(e,struct child_process,elem);
+            if(ch_pcb->pid == t->tid){
+                t->pcb->in_parent = ch_pcb;
+                /* 标记为alive，如果创建失败改成false */
+                ch_pcb->alive = true;
+                ch_pcb->create_success = true;
+                break;
+            }
+        }
+    }
+    success = copy_memory(t->parent->pcb->pagedir,t->pcb->pagedir);
+    if(success == false){
+        goto fail;
+    }
+    sema_up(&t->pcb->in_parent->sema);//加载成功释放信号量
+    
+    struct intr_frame if_ = t->parent->pcb->saved_if;
+    asm volatile("movl %0, %%esp; jmp intr_exit" : : "g"(&if_) : "memory");
+    NOT_REACHED();
+
+fail:
+    struct process* pcb_to_free = t->pcb;
+    struct child_process* local_in_parent = t->pcb->in_parent;
+    t->pcb = NULL;
+    free(pcb_to_free);
+
+    if(local_in_parent != NULL){
+        local_in_parent->exit_status = -1;
+        local_in_parent->alive = false;
+        local_in_parent->create_success = false;
+        sema_up(&local_in_parent->sema);
+    }
+    thread_exit();//这里没有释放pcb的pd。会造成内存泄漏嘛?-->process_exit?
+}
+static bool copy_memory(uint32_t* parent,uint32_t* child){
+    char* addr = 0x08048000;
+    char* vpage = NULL;
+    bool writable = false;
+
+    for(;addr < PHYS_BASE; addr += PGSIZE){
+        vpage = pagedir_get_page(parent,addr);
+        
+        if(vpage == NULL){
+            continue;
+        }
+        /* 该物理页不为空，要新申请一页然后memcpy */
+        char* new = palloc_get_page(PAL_USER | PAL_ZERO);
+        memcpy(new,vpage,PGSIZE);
+        
+        if(pagedir_set_page(child,addr,new,writable) != true){
+            palloc_free_page(new);
+            return false;
+        }
+    }
+    return true;
 }
 
 /* Sets up the CPU for running user code in the current
@@ -433,7 +557,6 @@ static bool load_segment(struct file* file, off_t ofs, uint8_t* upage, uint32_t 
    Stores the executable's entry point into *EIP
    and its initial stack pointer into *ESP.
    Returns true if successful, false otherwise. */
-// bool load(const char* file_name, void (**eip)(void), void** esp) 
 bool load(struct pass_args* arg, void (**eip)(void), void** esp) {
 
   const char* file_name = arg->argv[0];
@@ -522,8 +645,7 @@ bool load(struct pass_args* arg, void (**eip)(void), void** esp) {
   if (!setup_stack(esp))
     goto done;
 
-/*
-      Address         Name         Data        Type
+/*   Address         Name         Data        Type
     0xbffffffc   argv[3][...]    bar\0       char[4]
     0xbffffff8   argv[2][...]    foo\0       char[4]
     0xbffffff5   argv[1][...]    -l\0        char[3]
@@ -539,7 +661,6 @@ bool load(struct pass_args* arg, void (**eip)(void), void** esp) {
     0xbfffffcc   return address    0         void (*) ()
 */
 
-    // void* STACK_BOTTOM = PHYS_BASE - PGSIZE;//传入fn_copy的时候只分配了一页
     void *new_esp = *esp;
     char* arg_ptrs[MAX_ARGC]; //如果不用固定数组，goto会报错
 
@@ -639,20 +760,13 @@ static bool validate_segment(const struct Elf32_Phdr* phdr, struct file* file) {
   return true;
 }
 
-/* Loads a segment starting at offset OFS in FILE at address
-   UPAGE.  In total, READ_BYTES + ZERO_BYTES bytes of virtual
-   memory are initialized, as follows:
-
-        - READ_BYTES bytes at UPAGE must be read from FILE
-          starting at offset OFS.
-
-        - ZERO_BYTES bytes at UPAGE + READ_BYTES must be zeroed.
-
-   The pages initialized by this function must be writable by the
-   user process if WRITABLE is true, read-only otherwise.
-
-   Return true if successful, false if a memory allocation error
-   or disk read error occurs. */
+/* 从文件 FILE 中偏移量为 OFS 的位置加载一个段，地址为UPAGE。
+   总共初始化 READ_BYTES + ZERO_BYTES 字节的虚拟内存，
+   具体如下：
+   - 必须从文件 FILE 中偏移量为 OFS 的位置读取 UPAGE 处的 READ_BYTES 字节。
+   - 必须将 UPAGE + READ_BYTES 处的 ZERO_BYTES 字节清零。
+   如果 WRITABLE 为 true，则此函数初始化的页面必须对用户进程可写；否则为只读。
+   如果成功，则返回 true；如果发生内存分配错误或磁盘读取错误，则返回 false。 */
 static bool load_segment(struct file* file, off_t ofs, uint8_t* upage, uint32_t read_bytes,
                          uint32_t zero_bytes, bool writable) {
   ASSERT((read_bytes + zero_bytes) % PGSIZE == 0);
@@ -710,15 +824,11 @@ static bool setup_stack(void** esp) {
   return success;
 }
 
-/* Adds a mapping from user virtual address UPAGE to kernel
-   virtual address KPAGE to the page table.
-   If WRITABLE is true, the user process may modify the page;
-   otherwise, it is read-only.
-   UPAGE must not already be mapped.
-   KPAGE should probably be a page obtained from the user pool
-   with palloc_get_page().
-   Returns true on success, false if UPAGE is already mapped or
-   if memory allocation fails. */
+/* 将用户虚拟地址 UPAGE 到内核虚拟地址 KPAGE 的映射添加到页表中。
+   如果 WRITABLE 为真，则用户进程可以修改该页；否则，该页为只读。
+   UPAGE 必须尚未被映射。KPAGE 应该是从用户池中获取的页，
+   可通过 palloc_get_page() 获取。
+   成功时返回 true，如果 UPAGE 已被映射或内存分配失败，则返回 false。 */
 static bool install_page(void* upage, void* kpage, bool writable) {
   struct thread* t = thread_current();
 

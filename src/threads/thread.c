@@ -158,21 +158,16 @@ void thread_print_stats(void) {
          user_ticks);
 }
 
-/* Creates a new kernel thread named NAME with the given initial
-   PRIORITY, which executes FUNCTION passing AUX as the argument,
-   and adds it to the ready queue.  Returns the thread identifier
-   for the new thread, or TID_ERROR if creation fails.
-
-   If thread_start() has been called, then the new thread may be
-   scheduled before thread_create() returns.  It could even exit
-   before thread_create() returns.  Contrariwise, the original
-   thread may run for any amount of time before the new thread is
-   scheduled.  Use a semaphore or some other form of
-   synchronization if you need to ensure ordering.
-
-   The code provided sets the new thread's `priority' member to
-   PRIORITY, but no actual priority scheduling is implemented.
-   Priority scheduling is the goal of Problem 1-3. */
+/* 创建一个名为 NAME 的新内核线程，并赋予其给定的初始优先级
+   PRIORITY，该线程执行函数 FUNCTION，并将 AUX 作为参数传递，
+   然后将其添加到就绪队列。返回新线程的线程标识符
+   如果创建失败，则返回 TID_ERROR。
+   如果已调用 thread_start()，则新线程可能在 thread_create() 返回之前被调度
+   甚至可能在 thread_create() 返回之前退出相反，
+   原始线程可能在新的线程被调度之前运行任意时间
+   如果需要确保顺序，请使用信号量或其他形式的同步机制。
+   提供的代码将新线程的 `priority` 成员设置为PRIORITY，
+   但并未实现实际的优先级调度。优先级调度是问题 1-3 的目标。 */
 tid_t thread_create(const char* name, int priority, thread_func* function, void* aux) {
   struct thread* t;
   struct kernel_thread_frame* kf;

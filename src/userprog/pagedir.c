@@ -8,10 +8,8 @@
 
 static void invalidate_pagedir(uint32_t*);
 
-/* Creates a new page directory that has mappings for kernel
-   virtual addresses, but none for user virtual addresses.
-   Returns the new page directory, or a null pointer if memory
-   allocation fails. */
+/* 创建一个新的页面目录，其中包含内核虚拟地址的映射，但不包含用户虚拟地址的映射。
+   返回新的页面目录，如果内存分配失败，则返回空指针。 */
 uint32_t* pagedir_create(void) {
   uint32_t* pd = palloc_get_page(0);
   if (pd != NULL)
@@ -41,13 +39,7 @@ void pagedir_destroy(uint32_t* pd) {
   palloc_free_page(pd);
 }
 
-/* Returns the address of the page table entry for virtual
-   address VADDR in page directory PD.
-   If PD does not have a page table for VADDR, behavior depends
-   on CREATE.  If CREATE is true, then a new page table is
-   created and a pointer into it is returned.  Otherwise, a null
-   pointer is returned.
-   返回页面目录 PD 中虚拟地址 VADDR 的页表项地址。
+/* 返回页面目录 PD 中虚拟地址 VADDR 的页表项地址。
    如果 PD 没有 VADDR 的页表，则行为取决于 CREATE 语句。
    如果 CREATE 语句为真，则会创建一个新的页表，
    并返回指向该页表的指针。否则，返回一个空指针。
@@ -79,17 +71,7 @@ static uint32_t* lookup_page(uint32_t* pd, const void* vaddr, bool create) {
   return &pt[pt_no(vaddr)];
 }
 
-/* Adds a mapping in page directory PD from user virtual page
-   UPAGE to the physical frame identified by kernel virtual
-   address KPAGE.
-   UPAGE must not already be mapped.
-   KPAGE should probably be a page obtained from the user pool
-   with palloc_get_page().
-   If WRITABLE is true, the new page is read/write;
-   otherwise it is read-only.
-   Returns true if successful, false if memory allocation
-   failed. 
-   在页面目录 PD 中添加一个映射，
+/* 在页面目录 PD 中添加一个映射，
    将用户虚拟页面 UPAGE 映射到内核虚拟地址 KPAGE 所标识的物理帧。
    UPAGE 必须尚未被映射。KPAGE 应该是从用户池中获取的页面，
    可通过 palloc_get_page() 获取。
@@ -115,11 +97,7 @@ bool pagedir_set_page(uint32_t* pd, void* upage, void* kpage, bool writable) {
     return false;
 }
 
-/* Looks up the physical address that corresponds to user virtual
-   address UADDR in PD.  Returns the kernel virtual address
-   corresponding to that physical address, or a null pointer if
-   UADDR is unmapped. 
-   查找与 PD 中的用户虚拟地址 UADDR 对应的物理地址。
+/* 查找与 PD 中的用户虚拟地址 UADDR 对应的物理地址。
    返回与该物理地址对应的内核虚拟地址，如果 UADDR 未映射，则返回空指针。*/
 void* pagedir_get_page(uint32_t* pd, const void* uaddr) {
   uint32_t* pte;

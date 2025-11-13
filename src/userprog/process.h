@@ -5,6 +5,7 @@
 #include <stdint.h>
 
 #include "filesys/directory.h"
+#include "threads/interrupt.h"
 // At most 8MB can be allocated to the stack
 // These defines will be used in Project 2: Multithreading
 #define MAX_STACK_PAGES (1 << 11)
@@ -32,7 +33,7 @@ struct child_process{
 
 #define MAX_FD_NUM 128
 struct file_descriptor{
-      int flag;                     /* 控制模式 */
+      // int flag;                     /* 控制模式 */
       char name[NAME_MAX];          /* 文件名字 */
       struct file* file_ptr;        /* 文件指针 */
 };
@@ -57,6 +58,7 @@ struct process {
 
    struct file* elf;          /* 可执行文件的指针，用于退出时关闭 */
 
+   struct intr_frame saved_if;
 };
 
 struct pass_args{
@@ -70,6 +72,7 @@ pid_t process_execute(const char* file_name);
 int process_wait(pid_t);
 void process_exit(void);
 void process_activate(void);
+pid_t process_fork(void);
 
 bool is_main_thread(struct thread*, struct process*);
 pid_t get_pid(struct process*);
