@@ -217,3 +217,15 @@ static void invalidate_pagedir(uint32_t* pd) {
     pagedir_activate(pd);
   }
 }
+
+/* 检查虚拟地址对应的page是否可写 */
+bool pagedir_is_writable(uint32_t* pd, const void* vaddr){
+    uint32_t* pte;
+    ASSERT(is_user_vaddr(vaddr));
+    pte = lookup_page(pd,vaddr,false);
+
+    if(pte == NULL || (*pte & PTE_P == 0)){
+        return false;
+    }
+    return *pte & PTE_W ;
+}

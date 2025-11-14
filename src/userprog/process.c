@@ -20,6 +20,8 @@
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 
+#include "threads/pte.h"
+
 static thread_func start_process NO_RETURN;
 static thread_func start_pthread NO_RETURN;
 bool load(struct pass_args* arg, void (**eip)(void), void** esp);
@@ -325,7 +327,9 @@ void process_exit(void) {
     struct process* pcb_to_free = cur->pcb;
     struct child_process* in_parent = pcb_to_free->in_parent;
 
-    file_allow_write(pcb_to_free->elf);
+    /* 如果不是fork的，要释放执行文件的写入权限 */
+    if(pcb_to_free->elf != NULL)
+        file_allow_write(pcb_to_free->elf);
     
     cur->pcb = NULL;
 
@@ -349,20 +353,7 @@ void process_exit(void) {
 pid_t process_fork(void){
     struct thread *t = thread_current();
 
-    char child_name[16];
-    size_t len = strlen(t->pcb->process_name);
-    memcpy(child_name,t->pcb->process_name,sizeof(char)*len);
-    if(len < 13){
-        child_name[len] = '-';
-        child_name[len+1] = 'c';
-        child_name[len+2] = '\0';
-    }else{
-        child_name[13] = '-';
-        child_name[14] = 'c';
-        child_name[15] = '\0';
-    }
-
-    tid_t tid = thread_create(child_name,PRI_DEFAULT,start_fork_process,NULL);
+    tid_t tid = thread_create(t->pcb->process_name,PRI_DEFAULT,start_fork_process,NULL);
     if(tid == TID_ERROR){
         return TID_ERROR;
     }
@@ -462,6 +453,8 @@ static bool copy_memory(uint32_t* parent,uint32_t* child){
         /* 该物理页不为空，要新申请一页然后memcpy */
         char* new = palloc_get_page(PAL_USER | PAL_ZERO);
         memcpy(new,vpage,PGSIZE);
+
+        writable = pagedir_is_writable(parent,addr);
         
         if(pagedir_set_page(child,addr,new,writable) != true){
             palloc_free_page(new);
