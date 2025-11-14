@@ -72,6 +72,7 @@ static int syscall_open(const char *file){
     if(idx_unused == -1){
         return -1;
     }
+    // printf("fd = %d\n",idx_unused);
     /* 没满 */
     entry->using[idx_unused] = true;
     entry->fd[idx_unused].file_ptr = ptr;
@@ -200,7 +201,10 @@ static pid_t syscall_fork(struct intr_frame* f){
     
     /* 保存父进程的寄存器状态，用于模拟中断 */
     t->pcb->saved_if = *f;
-    return process_fork();
+    pid_t pid;
+    pid = process_fork();
+    // printf("[SYS_FORK]process = %s,elf = %s\n",t->pcb->process_name,t->pcb->elf);
+    return pid;
 }
 //arg[0]是调用号，其余是参数
 static void syscall_handler(struct intr_frame* f UNUSED) {
@@ -326,10 +330,12 @@ static void check_valid_str(const char* str){
 
     char* p = str;
     int cnt = 0;
-    while(*p != '\0' && cnt < 1024){
+    
+    while(cnt < 1024){
         if(pagedir_get_page(t->pcb->pagedir,p) == NULL){
             syscall_exit(-1);
         }
+        if(*p == '\0')return;//找到结尾了，不用继续了
         p++;
         cnt++;
     }

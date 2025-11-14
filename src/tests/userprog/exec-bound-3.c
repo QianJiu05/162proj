@@ -9,6 +9,7 @@
 #include "tests/main.h"
 
 void test_main(void) {
+  //getboundary的第一个字节有效，其余无效
   char* p = get_bad_boundary() - 1;
   *p = 'a';
   exec(p);

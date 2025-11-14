@@ -20,7 +20,7 @@ void test_main(void) {
 
   if (pid == 0) {
     int second_fd;
-    CHECK((second_fd = open("second.txt")) >= 2, "open() returned %d", second_fd);
+    CHECK((second_fd = open("second.txt")) >= 2, "child:open() returned %d", second_fd);
     seek(second_fd, 62);
 
     seek(first_fd, initial_pos + 10);
@@ -31,7 +31,7 @@ void test_main(void) {
     exit(0);
   } else if (pid > 0) {
     int second_fd;
-    CHECK((second_fd = open("second.txt")) >= 2, "open() returned %d", second_fd);
+    CHECK((second_fd = open("second.txt")) >= 2, "father:open() returned %d", second_fd);
     seek(second_fd, 31);
 
     wait(pid);
