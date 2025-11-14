@@ -226,13 +226,13 @@ static void start_process(void* file_name) {
     palloc_free_page(file_name);//传进来的是fn copy as filename
 
     if (!success) {
-      if(local_in_parent != NULL){
-          local_in_parent->exit_status = -1;
-          local_in_parent->alive = false;
-          local_in_parent->create_success = false;
-          sema_up(&local_in_parent->sema);
-      }
-      thread_exit();//这里没有释放pcb的pd。会造成内存泄漏嘛?-->process_exit?
+        if(local_in_parent != NULL){
+            local_in_parent->exit_status = -1;
+            local_in_parent->alive = false;
+            local_in_parent->create_success = false;
+            sema_up(&local_in_parent->sema);
+        }
+        thread_exit();//这里没有释放pcb的pd。会造成内存泄漏嘛?-->process_exit?
     }
 
     sema_up(&local_in_parent->sema);//加载成功也要释放信号量
@@ -264,17 +264,16 @@ int process_wait(pid_t child_pid) {
     {
         struct child_process *p = list_entry(e,struct child_process,elem);
         if(child_pid == p->pid){
-            /* 已经死了，不能再等待了 */
+            /* 已经死了 */
             if(p->alive == false){
                 int status = p->exit_status;
-                // printf("pid = %d, alive false, delete\n",p->pid);
                 //把这个节点从链表中删除
                 list_remove(e);
                 free(p);
                 return status;
             }
 
-            /* 已经被等待的不能再被等待，立刻return-1 */
+            /* 已经被等待，立刻return-1 */
             if(p->wait_by_parent == true){
                 return -1;
             }
@@ -327,10 +326,17 @@ void process_exit(void) {
     struct process* pcb_to_free = cur->pcb;
     struct child_process* in_parent = pcb_to_free->in_parent;
 
+    /* 清除fd */
+    for(int i = 3; i < MAX_FD_NUM; i++){
+        if (cur->pcb->fdt.using[i]) {
+            file_close(cur->pcb->fdt.fd[i].file_ptr);
+            cur->pcb->fdt.using[i] = false;
+        }
+    }
     /* 如果不是fork的，要释放执行文件的写入权限 */
     if(pcb_to_free->elf != NULL)
         file_allow_write(pcb_to_free->elf);
-    
+
     cur->pcb = NULL;
 
     /* 清除该PCB的child_list */
@@ -344,7 +350,8 @@ void process_exit(void) {
       //exit_status在syscall里填写了
         in_parent->alive = false;
         /* 主线程一直睡眠到这个进程exit，才被唤醒 */
-        sema_up(&(in_parent->sema));
+        if(in_parent->wait_by_parent)
+            sema_up(&(in_parent->sema));
     }
       free(pcb_to_free);
       thread_exit();
@@ -394,8 +401,26 @@ static void start_fork_process(void){
     }
     t->pcb->main_thread = t;
     memcpy(t->pcb->process_name,t->name,sizeof(t->pcb->process_name));
+    t->pcb->elf = NULL;
     list_init(&(t->pcb->child_list));
-    memcpy(&t->pcb->fdt,&t->parent->pcb->fdt,sizeof(t->pcb->fdt));
+    
+    /* 复制父进程的fd */
+    char file_name[NAME_MAX];
+    struct file_descript_table *parent_fdt,*child_fdt;
+    parent_fdt = &t->parent->pcb->fdt;
+    child_fdt = &t->pcb->fdt;
+    size_t ch_cnt = 3;
+    for(size_t i = 3; i < MAX_FD_NUM; i++){
+        if(parent_fdt->using[i] == true){
+            memcpy(file_name,parent_fdt->fd[i].name,sizeof(char)*NAME_MAX);
+            struct file* file = filesys_open(file_name);
+            child_fdt->using[ch_cnt] = true;
+            child_fdt->fd[ch_cnt].file_ptr = file;
+            memcpy(&(child_fdt->fd[ch_cnt].name),file_name,NAME_MAX);
+            ch_cnt++;
+
+        }
+    }
 
     /* 建立与父进程的连接 */
     t->pcb->in_parent = NULL;
@@ -415,6 +440,7 @@ static void start_fork_process(void){
             }
         }
     }
+    
     success = copy_memory(t->parent->pcb->pagedir,t->pcb->pagedir);
     if(success == false){
         goto fail;
