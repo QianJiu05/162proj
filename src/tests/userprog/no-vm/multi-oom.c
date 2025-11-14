@@ -1,17 +1,9 @@
-/* Recursively executes itself until the child fails to execute.
-   We expect that at least 30 copies can run.
-
-   We count how many children your kernel was able to execute
-   before it fails to start a new process.  We require that,
-   if a process doesn't actually get to start, exec() must
-   return -1, not a valid PID.
-
-   We repeat this process 10 times, checking that your kernel
-   allows for the same level of depth every time.
-
-   In addition, some processes will spawn children that terminate
-   abnormally after allocating some resources.
-
+/* 递归执行自身，直到子进程执行失败。我们预期至少可以运行 30 个副本。
+  我们统计内核在启动新进程失败之前能够执行的子进程数量。
+  我们要求，如果进程实际上没有启动，`exec()` 必须返回 -1，
+  而不是有效的进程 ID (PID)。
+  我们将此过程重复 10 次，并检查内核每次是否允许相同的递归深度。
+  此外，某些进程会生成一些子进程，这些子进程在分配一些资源后会异常终止。
    Written by Godmar Back <godmar@gmail.com>
  */
 

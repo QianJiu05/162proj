@@ -448,6 +448,7 @@ static void start_fork_process(void){
     sema_up(&t->pcb->in_parent->sema);//加载成功释放信号量
     
     struct intr_frame if_ = t->parent->pcb->saved_if;
+    if_.eax = 0;
     asm volatile("movl %0, %%esp; jmp intr_exit" : : "g"(&if_) : "memory");
     NOT_REACHED();
 
