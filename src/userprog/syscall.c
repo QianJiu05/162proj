@@ -49,9 +49,12 @@ static int syscall_open(const char *file){
     struct file* ptr = NULL;
     sema_down(&global);
     ptr = filesys_open(file);
+    sema_up(&global);
+
     if(ptr == NULL){
         return -1;
     }
+
     //应该从pcb的fd进行对比，找到在不在，然后更新
     struct file_descript_table* entry = &(thread_current()->pcb->fdt);
     
@@ -79,7 +82,6 @@ static int syscall_open(const char *file){
     entry->fd[idx_unused].file_ptr = ptr;
     strlcpy(entry->fd[idx_unused].name,file,sizeof(entry->fd[idx_unused].name));
 
-    sema_up(&global);
     return idx_unused;
 
 }
