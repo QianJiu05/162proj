@@ -47,6 +47,7 @@ static bool syscall_remove(const char *file){
 }
 static int syscall_open(const char *file){
     struct file* ptr = NULL;
+    sema_down(&global);
     ptr = filesys_open(file);
     if(ptr == NULL){
         return -1;
@@ -77,6 +78,8 @@ static int syscall_open(const char *file){
     entry->using[idx_unused] = true;
     entry->fd[idx_unused].file_ptr = ptr;
     strlcpy(entry->fd[idx_unused].name,file,sizeof(entry->fd[idx_unused].name));
+
+    sema_up(&global);
     return idx_unused;
 
 }

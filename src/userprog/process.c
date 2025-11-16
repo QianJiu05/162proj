@@ -339,7 +339,7 @@ void process_exit(void) {
     for(int i = 3; i < MAX_FD_NUM; i++){
         if (cur->pcb->fdt.using[i]) {
             file_close(cur->pcb->fdt.fd[i].file_ptr);
-            cur->pcb->fdt.using[i] = false;
+            cur->pcb->fdt.using[i] = false;//这个有必要吗?
         }
     }
     /* 如果不是fork的，要释放执行文件的写入权限 */
@@ -429,11 +429,12 @@ static void start_fork_process(void){
     child_fdt = &t->pcb->fdt;
     for(size_t i = 3; i < MAX_FD_NUM; i++){
         if(parent_fdt->using[i] == true){
-            memcpy(file_name,parent_fdt->fd[i].name,sizeof(char)*NAME_MAX);
-            struct file* file = file_reopen(parent_fdt->fd[i].file_ptr);
+            // memcpy(file_name,parent_fdt->fd[i].name,sizeof(char)*NAME_MAX);
+            struct file* file = file_fork(parent_fdt->fd[i].file_ptr);
+            // struct file* file = file_reopen(parent_fdt->fd[i].file_ptr);
             child_fdt->using[i] = true;
             child_fdt->fd[i].file_ptr = file;
-            memcpy(&(child_fdt->fd[i].name),file_name,NAME_MAX);
+            // memcpy(&(child_fdt->fd[i].name),file_name,NAME_MAX);
         }
     }
 
