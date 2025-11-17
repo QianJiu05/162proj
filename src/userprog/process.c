@@ -323,9 +323,11 @@ void process_exit(void) {
           这样定时器中断就无法切换回进程页面目录。
           我们必须先激活基页面目录，然后再销毁进程的页面目录，
           否则，我们当前活动的页面目录将是已被释放（并清空）的页面目录。 */
-      cur->pcb->pagedir = NULL;
-      pagedir_activate(NULL);
-      pagedir_destroy(pd);
+        cur->pcb->pagedir = NULL;
+        pagedir_activate(NULL);
+        // printf("[EXIT]i'm:%d,before destroy pd\n",cur->tid);
+        pagedir_destroy(pd);
+        // printf("[EXIT]i'm:%d,after destroy pd\n",cur->tid);
     }
 
     /* Free the PCB of this process and kill this thread
@@ -338,14 +340,15 @@ void process_exit(void) {
     /* 清除fd */
     for(int i = 3; i < MAX_FD_NUM; i++){
         if (cur->pcb->fdt.using[i]) {
-            file_close(cur->pcb->fdt.fd[i].file_ptr);
+            if(cur->pcb->fdt.file_ptr[i] != NULL){
+                file_close(cur->pcb->fdt.file_ptr[i]);
+            }
             cur->pcb->fdt.using[i] = false;//这个有必要吗?
         }
     }
     /* 如果不是fork的，要释放执行文件的写入权限 */
     if(pcb_to_free->elf != NULL)
         file_close(pcb_to_free->elf);
-        // file_allow_write(pcb_to_free->elf);
 
     cur->pcb = NULL;
 
@@ -423,18 +426,22 @@ static void start_fork_process(void){
         goto fail;
     }
     /* 复制父进程的fd */
-    char file_name[NAME_MAX];
     struct file_descript_table *parent_fdt,*child_fdt;
     parent_fdt = &t->parent->pcb->fdt;
     child_fdt = &t->pcb->fdt;
+    memset(child_fdt,0,sizeof(t->pcb->fdt));
     for(size_t i = 3; i < MAX_FD_NUM; i++){
         if(parent_fdt->using[i] == true){
-            // memcpy(file_name,parent_fdt->fd[i].name,sizeof(char)*NAME_MAX);
-            struct file* file = file_fork(parent_fdt->fd[i].file_ptr);
-            // struct file* file = file_reopen(parent_fdt->fd[i].file_ptr);
+            if(parent_fdt->file_ptr[i] == NULL){
+                continue;
+            }
+            struct file* file = file_fork(parent_fdt->file_ptr[i]);
+            if(file == NULL){
+                printf("fork fileptr failed\n");
+                goto fail;
+            }
             child_fdt->using[i] = true;
-            child_fdt->fd[i].file_ptr = file;
-            // memcpy(&(child_fdt->fd[i].name),file_name,NAME_MAX);
+            child_fdt->file_ptr[i] = file;
         }
     }
 
@@ -475,6 +482,8 @@ fail:
     struct process* pcb_to_free = t->pcb;
     struct child_process* local_in_parent = t->pcb->in_parent;
     t->pcb = NULL;
+    if(pcb_to_free->pagedir != NULL)
+        pagedir_destroy(pcb_to_free->pagedir);
     free(pcb_to_free);
 
     if(local_in_parent != NULL){
@@ -486,7 +495,8 @@ fail:
     thread_exit();//这里没有释放pcb的pd。会造成内存泄漏嘛?-->process_exit?
 }
 static bool copy_memory(uint32_t* parent,uint32_t* child){
-    void* addr = (void*)0x08048000;
+    void* addr = (void*)0;
+  
     void* vpage = NULL;
     bool writable = false;
 
@@ -498,15 +508,21 @@ static bool copy_memory(uint32_t* parent,uint32_t* child){
         }
         /* 该物理页不为空，要新申请一页然后memcpy */
         void* new = palloc_get_page(PAL_USER | PAL_ZERO);
+        if(new == NULL){
+            printf("get page failed\n");
+            return false;
+        }
         memcpy(new,vpage,PGSIZE);
 
         writable = pagedir_is_writable(parent,addr);
         
         if(pagedir_set_page(child,addr,new,writable) != true){
             palloc_free_page(new);
+            // printf("[COPY]failed\n");
             return false;
         }
     }
+    // printf("[COPY]true\n");
     return true;
 }
 

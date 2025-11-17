@@ -32,13 +32,8 @@ struct child_process{
 };
 
 #define MAX_FD_NUM 128
-struct file_descriptor{
-      // int flag;                     /* 控制模式 */
-      char name[NAME_MAX];          /* 文件名字 */
-      struct file* file_ptr;        /* 文件指针 */
-};
 struct file_descript_table{
-      struct file_descriptor fd[MAX_FD_NUM];  /* 文件描述符数组 */
+      struct file* file_ptr[MAX_FD_NUM];        /* 文件指针 */
       bool using[MAX_FD_NUM];       /* 文件指针对应的索引 */
 };
 /* 给定进程的进程控制块。由于每个进程可以有多个线程，

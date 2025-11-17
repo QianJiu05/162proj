@@ -63,7 +63,7 @@ static int syscall_open(const char *file){
     for(size_t i = 3; i < MAX_FD_NUM; i++){
         /* 先判断有没有在使用 */
         if(entry->using[i] == true){
-            if(ptr == entry->fd[i].file_ptr){
+            if(ptr == entry->file_ptr[i]){
                 return i;
             }
         }else{
@@ -79,8 +79,7 @@ static int syscall_open(const char *file){
     // printf("fd = %d\n",idx_unused);
     /* 没满 */
     entry->using[idx_unused] = true;
-    entry->fd[idx_unused].file_ptr = ptr;
-    strlcpy(entry->fd[idx_unused].name,file,sizeof(entry->fd[idx_unused].name));
+    entry->file_ptr[idx_unused] = ptr;
 
     return idx_unused;
 
@@ -91,7 +90,7 @@ static int syscall_filesize(int fd){
     if(p->fdt.using[fd] == false){
         return -1;
     }
-    int size = file_length(p->fdt.fd[fd].file_ptr);
+    int size = file_length(p->fdt.file_ptr[fd]);
     return size;
 }
 static int syscall_read(int fd, void* buffer, unsigned size){
@@ -109,7 +108,7 @@ static int syscall_read(int fd, void* buffer, unsigned size){
     int cur_read = 0;
     if(fd > 2){
         sema_down(&global);
-        cur_read = file_read(p->fdt.fd[fd].file_ptr,buffer,size);
+        cur_read = file_read(p->fdt.file_ptr[fd],buffer,size);
         sema_up(&global);
         return cur_read;
     }
@@ -158,7 +157,7 @@ static int syscall_write(int fd, void* buffer, size_t size){
             return -1;
         }
         sema_down(&global);
-        int ret = file_write(p->fdt.fd[fd].file_ptr,buffer,size);
+        int ret = file_write(p->fdt.file_ptr[fd],buffer,size);
         sema_up(&global);
         return ret;
     }
@@ -172,19 +171,19 @@ static void syscall_seek(int fd,unsigned position){
             return ;
         }
     sema_down(&global);
-    file_seek(p->fdt.fd[fd].file_ptr,position);
+    file_seek(p->fdt.file_ptr[fd],position);
     sema_up(&global);
 }
 static int syscall_tell(int fd){
     if(fd <= 2 || fd >= MAX_FD_NUM){
-        return;
+        return -1;
     }
     struct process* p = thread_current()->pcb;
         if(p->fdt.using[fd] == false){
-            return ;
+            return -1;
         }
     sema_up(&global);
-    int ret = file_tell(p->fdt.fd[fd].file_ptr);
+    int ret = file_tell(p->fdt.file_ptr[fd]);
     sema_down(&global);
     return ret;
 }
@@ -195,20 +194,18 @@ static void syscall_close(int fd){
     struct process* p = thread_current()->pcb;
     if(p->fdt.using[fd] == true){
         sema_down(&global);
-        file_close(p->fdt.fd[fd].file_ptr);
+        file_close(p->fdt.file_ptr[fd]);
         sema_up(&global);
         p->fdt.using[fd] = false;
-        p->fdt.fd[fd].file_ptr = NULL;
+        p->fdt.file_ptr[fd] = NULL;
     }
 }
 static pid_t syscall_fork(struct intr_frame* f){
     struct thread* t = thread_current();
-    
     /* 保存父进程的寄存器状态，用于模拟中断 */
     t->pcb->saved_if = *f;
     pid_t pid;
     pid = process_fork();
-    // printf("[SYS_FORK]process = %s,elf = %s\n",t->pcb->process_name,t->pcb->elf);
     return pid;
 }
 //arg[0]是调用号，其余是参数
