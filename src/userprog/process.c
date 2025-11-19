@@ -28,6 +28,7 @@ static thread_func start_pthread NO_RETURN;
 bool load(struct pass_args* arg, void (**eip)(void), void** esp);
 bool setup_thread(void (**eip)(void), void** esp);
 
+struct lock file_lock;
 static bool copy_memory(uint32_t* parent,uint32_t* child);
 static void start_fork_process(void);
 
@@ -56,6 +57,7 @@ void userprog_init(void) {
         t->pcb->pagedir = NULL;
         memset(&t->pcb->fdt,0,sizeof(t->pcb->fdt));
     }
+    lock_init(&file_lock);
     /* Kill the kernel if we did not succeed */
     ASSERT(success);
 }
@@ -640,7 +642,9 @@ bool load(struct pass_args* arg, void (**eip)(void), void** esp) {
   process_activate();
 
   /* Open executable file. */
+  lock_acquire(&file_lock);
   file = filesys_open(file_name);
+  lock_release(&file_lock);
   if (file == NULL) {
     printf("load: %s: open failed\n", file_name);
     goto done;

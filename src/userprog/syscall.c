@@ -49,9 +49,9 @@ static bool syscall_remove(const char *file){
 }
 static int syscall_open(const char *file){
     struct file* ptr = NULL;
-    sema_down(&global);
+    // sema_down(&global);
     ptr = filesys_open(file);
-    sema_up(&global);
+    // sema_up(&global);
 
     if(ptr == NULL){
         return -1;
