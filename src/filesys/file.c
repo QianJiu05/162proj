@@ -46,11 +46,9 @@ struct file* file_fork(struct file* file){
 }
 /* Closes FILE. */
 void file_close(struct file* file) {
-    if(file == NULL){
-        return;
-    }
+    if(file == NULL){return;}
     file->user--;
-    /* 如果只有自己，那么可以把pos和user全部free */
+
     if(file->user == 0){
         file_allow_write(file);
         inode_close(file->inode);

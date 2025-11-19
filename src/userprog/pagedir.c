@@ -11,6 +11,7 @@ static void invalidate_pagedir(uint32_t*);
 /* 创建一个新的页面目录，其中包含内核虚拟地址的映射，但不包含用户虚拟地址的映射。
    返回新的页面目录，如果内存分配失败，则返回空指针。 */
 uint32_t* pagedir_create(void) {
+  // printf("[PD]enter\n");
   uint32_t* pd = palloc_get_page(0);
   if (pd != NULL)
     memcpy(pd, init_page_dir, PGSIZE);

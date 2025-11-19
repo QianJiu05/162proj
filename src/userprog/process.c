@@ -407,14 +407,25 @@ pid_t process_fork(void){
     return tid;
 }
 static void start_fork_process(void){
+    // printf("[START]enter\n");
     struct thread* t = thread_current();
 
     struct process* new_pcb = malloc(sizeof(struct process));
+    if(new_pcb == NULL){
+        // printf("[START]pcb null n");
+        goto fail;
+    }
     bool success = false;
 
+    memset(new_pcb,0,sizeof(struct process));
+
     t->pcb = new_pcb;
+    // printf("[START]create pd\n");
     t->pcb->pagedir = pagedir_create();
+    // printf("[START]after pd\n");
+
     if(t->pcb->pagedir == NULL){
+      printf("[START]pd failed\n");
         goto fail;
     }
     t->pcb->main_thread = t;
@@ -423,8 +434,10 @@ static void start_fork_process(void){
     list_init(&(t->pcb->child_list));
 
     if (t->parent == NULL || t->parent->pcb == NULL) {
+      printf("[START]NULL\n");
         goto fail;
     }
+    // printf("[START]link fd\n");
     /* 复制父进程的fd */
     struct file_descript_table *parent_fdt,*child_fdt;
     parent_fdt = &t->parent->pcb->fdt;
@@ -437,14 +450,14 @@ static void start_fork_process(void){
             }
             struct file* file = file_fork(parent_fdt->file_ptr[i]);
             if(file == NULL){
-                printf("fork fileptr failed\n");
+                // printf("[START]fork fileptr failed\n");
                 goto fail;
             }
             child_fdt->using[i] = true;
             child_fdt->file_ptr[i] = file;
         }
     }
-
+// printf("[START]link in_parent\n");
     /* 建立与父进程的连接 */
     t->pcb->in_parent = NULL;
     struct thread* parent_thread = t->parent;
@@ -463,7 +476,7 @@ static void start_fork_process(void){
             }
         }
     }
-    
+    // printf("[START]copy mem\n");
     success = copy_memory(t->parent->pcb->pagedir,t->pcb->pagedir);
     if(success == false){
         goto fail;
@@ -509,7 +522,7 @@ static bool copy_memory(uint32_t* parent,uint32_t* child){
         /* 该物理页不为空，要新申请一页然后memcpy */
         void* new = palloc_get_page(PAL_USER | PAL_ZERO);
         if(new == NULL){
-            printf("get page failed\n");
+            // printf("get page failed\n");
             return false;
         }
         memcpy(new,vpage,PGSIZE);
