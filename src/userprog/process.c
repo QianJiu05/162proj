@@ -141,8 +141,6 @@ pid_t process_execute(const char* file_name) {
     sema_init(&(child->sema),0);
     list_push_back(&(t->pcb->child_list),&(child->elem));
 
-    // printf("[EXEC]exec:%s,i'm %s,child pid = %d\n",file_path,t->pcb->process_name,child->pid);
-
     /* 让父进程进入等待，创建子进程后唤醒父进程，
         不论是否成功，然后初始化child_PCB并返回tid */
     sema_down(&child->sema);
@@ -318,10 +316,8 @@ void process_exit(void) {
       to the kernel-only page directory. */
     pd = cur->pcb->pagedir;
     if (pd != NULL) {
-      /*  正确的顺序至关重要。在切换页面目录之前，
-          我们必须将cur->pcb->pagedir 设置为 NULL，
-          这样定时器中断就无法切换回进程页面目录。
-          我们必须先激活基页面目录，然后再销毁进程的页面目录，
+      /*  正确的顺序至关重要。在切换页面目录之前，我们必须将cur->pcb->pagedir 设置为 NULL，
+          这样定时器中断就无法切换回进程页面目录。我们必须先激活基页面目录，然后再销毁进程的页面目录，
           否则，我们当前活动的页面目录将是已被释放（并清空）的页面目录。 */
         cur->pcb->pagedir = NULL;
         pagedir_activate(NULL);
@@ -339,16 +335,17 @@ void process_exit(void) {
 
     /* 清除fd */
     for(int i = 3; i < MAX_FD_NUM; i++){
-        if (cur->pcb->fdt.using[i]) {
-            if(cur->pcb->fdt.file_ptr[i] != NULL){
-                file_close(cur->pcb->fdt.file_ptr[i]);
-            }
-            cur->pcb->fdt.using[i] = false;//这个有必要吗?
+        if (cur->pcb->fdt.using[i] && cur->pcb->fdt.file_ptr[i] != NULL) {
+            file_close(cur->pcb->fdt.file_ptr[i]);
+            // cur->pcb->fdt.using[i] = false;//这个有必要吗?
         }
     }
     /* 如果不是fork的，要释放执行文件的写入权限 */
-    if(pcb_to_free->elf != NULL)
+    if(pcb_to_free->elf != NULL){
+        // printf("[EXIT]close %s\n",pcb_to_free->elf);
         file_close(pcb_to_free->elf);
+        // printf("[EXIT]close elf.\n");
+    }
 
     cur->pcb = NULL;
 
@@ -360,14 +357,13 @@ void process_exit(void) {
     }
     /* 这个进程可能没有父进程，只有在非空时才能访问 */
     if(in_parent != NULL){
-      //exit_status在syscall里填写了
         in_parent->alive = false;
-        /* 主线程一直睡眠到这个进程exit，才被唤醒 */
+        /* 父进程一直睡眠到这个进程exit，才被唤醒 */
         if(in_parent->wait_by_parent)
             sema_up(&(in_parent->sema));
     }
-      free(pcb_to_free);
-      thread_exit();
+    free(pcb_to_free);
+    thread_exit();
 }
 
 pid_t process_fork(void){
@@ -409,45 +405,37 @@ pid_t process_fork(void){
 static void start_fork_process(void){
     // printf("[START]enter\n");
     struct thread* t = thread_current();
+    bool success = false, pcb_success = false;
 
     struct process* new_pcb = malloc(sizeof(struct process));
     if(new_pcb == NULL){
-        // printf("[START]pcb null n");
         goto fail;
     }
-    bool success = false;
+    pcb_success = true;
 
     memset(new_pcb,0,sizeof(struct process));
-
     t->pcb = new_pcb;
-    // printf("[START]create pd\n");
     t->pcb->pagedir = pagedir_create();
-    // printf("[START]after pd\n");
 
     if(t->pcb->pagedir == NULL){
-      printf("[START]pd failed\n");
         goto fail;
     }
     t->pcb->main_thread = t;
     memcpy(t->pcb->process_name,t->name,sizeof(t->pcb->process_name));
+    /* fork的进程没有elf */
     t->pcb->elf = NULL;
     list_init(&(t->pcb->child_list));
 
     if (t->parent == NULL || t->parent->pcb == NULL) {
-      printf("[START]NULL\n");
         goto fail;
     }
-    // printf("[START]link fd\n");
     /* 复制父进程的fd */
     struct file_descript_table *parent_fdt,*child_fdt;
     parent_fdt = &t->parent->pcb->fdt;
     child_fdt = &t->pcb->fdt;
     memset(child_fdt,0,sizeof(t->pcb->fdt));
     for(size_t i = 3; i < MAX_FD_NUM; i++){
-        if(parent_fdt->using[i] == true){
-            if(parent_fdt->file_ptr[i] == NULL){
-                continue;
-            }
+        if(parent_fdt->using[i] == true && parent_fdt->file_ptr[i] != NULL){
             struct file* file = file_fork(parent_fdt->file_ptr[i]);
             if(file == NULL){
                 // printf("[START]fork fileptr failed\n");
@@ -457,7 +445,6 @@ static void start_fork_process(void){
             child_fdt->file_ptr[i] = file;
         }
     }
-// printf("[START]link in_parent\n");
     /* 建立与父进程的连接 */
     t->pcb->in_parent = NULL;
     struct thread* parent_thread = t->parent;
@@ -492,24 +479,34 @@ static void start_fork_process(void){
     NOT_REACHED();
 
 fail:
-    struct process* pcb_to_free = t->pcb;
-    struct child_process* local_in_parent = t->pcb->in_parent;
-    t->pcb = NULL;
-    if(pcb_to_free->pagedir != NULL)
-        pagedir_destroy(pcb_to_free->pagedir);
-    free(pcb_to_free);
-
-    if(local_in_parent != NULL){
-        local_in_parent->exit_status = -1;
-        local_in_parent->alive = false;
-        local_in_parent->create_success = false;
-        sema_up(&local_in_parent->sema);
+    /* pcb申请成功的话，需要释放pcb */
+    printf("[FORK]failed\n");
+    if(pcb_success){
+        /* 关闭file_ptr */
+        for(size_t i = 3; i < MAX_FD_NUM; i++){
+            if(t->pcb->fdt.using[i] == true && t->pcb->fdt.file_ptr[i] != NULL){
+                file_close(t->pcb->fdt.file_ptr[i]);
+            }
+        }
+        /* 设置在父进程中的chpcb，并sema_up */
+        if(t->pcb->in_parent != NULL){
+            struct child_process* local_in_parent = t->pcb->in_parent;
+            local_in_parent->exit_status = -1;
+            local_in_parent->alive = false;
+            local_in_parent->create_success = false;
+            sema_up(&local_in_parent->sema);
+        }
+        /* 收尾pcb */
+        struct process* pcb_to_free = t->pcb;
+        t->pcb = NULL;
+        if(pcb_to_free->pagedir != NULL)
+            pagedir_destroy(pcb_to_free->pagedir);
+        free(pcb_to_free);
     }
     thread_exit();//这里没有释放pcb的pd。会造成内存泄漏嘛?-->process_exit?
 }
 static bool copy_memory(uint32_t* parent,uint32_t* child){
     void* addr = (void*)0;
-  
     void* vpage = NULL;
     bool writable = false;
 
