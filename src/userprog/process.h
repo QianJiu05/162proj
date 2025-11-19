@@ -52,7 +52,6 @@ struct process {
    struct child_process* in_parent;  /* 自己在父进程的节点 */
 
    struct file* elf;          /* 可执行文件的指针，用于退出时关闭 */
-
    struct intr_frame saved_if;
 };
 

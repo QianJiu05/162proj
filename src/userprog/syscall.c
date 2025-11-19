@@ -182,9 +182,9 @@ static int syscall_tell(int fd){
         if(p->fdt.using[fd] == false){
             return -1;
         }
-    sema_up(&global);
-    int ret = file_tell(p->fdt.file_ptr[fd]);
     sema_down(&global);
+    int ret = file_tell(p->fdt.file_ptr[fd]);
+    sema_up(&global);
     return ret;
 }
 static void syscall_close(int fd){

@@ -6,9 +6,9 @@
 /* An open file. */
 struct file {
   struct inode* inode; /* File's inode. */
-  off_t* pos;           /* Current position. */
+  off_t pos;           /* Current position. */
   bool deny_write;     /* Has file_deny_write() been called? */
-  int16_t* user;
+  int16_t user;
 };
 
 /* Opens a file for the given INODE, of which it takes ownership,
@@ -21,17 +21,8 @@ struct file* file_open(struct inode* inode) {
     struct file* file = calloc(1, sizeof *file);
     if (inode != NULL && file != NULL) {
         file->inode = inode;
-        file->pos = calloc(1,sizeof(off_t));
-        file->user = calloc(1,sizeof(int16_t));
-        if(file->pos == NULL || file->user == NULL){
-            inode_close(inode);
-            free(file);
-            return NULL;
-        }
-        *file->pos = 0;
-        *file->user++;
+        file->user++;
         file->deny_write = false;
-
         return file;
     } else {
       inode_close(inode);
@@ -50,27 +41,19 @@ struct file* file_fork(struct file* file){
     if(file == NULL){
         return NULL;
     }
-
-    struct file* new = calloc(1,sizeof(struct file));
-    new->inode = inode_reopen(file->inode);
-    (*file->user)++;
-    new->pos = file->pos;
-    new->user = file->pos;\
-    new->deny_write = file->deny_write;
-    return new;
+    file->user++;
+    return file;    
 }
 /* Closes FILE. */
 void file_close(struct file* file) {
     if(file == NULL){
         return;
     }
-    file_allow_write(file);
-    inode_close(file->inode);
-    *file->user--;
+    file->user--;
     /* 如果只有自己，那么可以把pos和user全部free */
-    if(*file->user == 0){
-        free(file->pos);
-        free(file->user);
+    if(file->user == 0){
+        file_allow_write(file);
+        inode_close(file->inode);
         free(file);
     }
 }
@@ -86,8 +69,8 @@ struct inode* file_get_inode(struct file* file) {
    which may be less than SIZE if end of file is reached.
    Advances FILE's position by the number of bytes read. */
 off_t file_read(struct file* file, void* buffer, off_t size) {
-  off_t bytes_read = inode_read_at(file->inode, buffer, size, *file->pos);
-  *file->pos += bytes_read;
+  off_t bytes_read = inode_read_at(file->inode, buffer, size, file->pos);
+  file->pos += bytes_read;
   return bytes_read;
 }
 
@@ -108,8 +91,8 @@ off_t file_read_at(struct file* file, void* buffer, off_t size, off_t file_ofs) 
    not yet implemented.)
    Advances FILE's position by the number of bytes read. */
 off_t file_write(struct file* file, const void* buffer, off_t size) {
-  off_t bytes_written = inode_write_at(file->inode, buffer, size, *file->pos);
-  *file->pos += bytes_written;
+  off_t bytes_written = inode_write_at(file->inode, buffer, size, file->pos);
+  file->pos += bytes_written;
   return bytes_written;
 }
 
@@ -156,12 +139,12 @@ off_t file_length(struct file* file) {
 void file_seek(struct file* file, off_t new_pos) {
   ASSERT(file != NULL);
   ASSERT(new_pos >= 0);
-  *file->pos = new_pos;
+  file->pos = new_pos;
 }
 
 /* Returns the current position in FILE as a byte offset from the
    start of the file. */
 off_t file_tell(struct file* file) {
   ASSERT(file != NULL);
-  return *file->pos;
+  return file->pos;
 }
