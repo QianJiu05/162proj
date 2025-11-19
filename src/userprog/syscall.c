@@ -34,9 +34,9 @@ static void syscall_exit(int status){
     process_exit();//程序运行到这里就结束了，不会有返回值
 }
 static uint32_t syscall_exec(const char* file_name){
-    sema_down(&global);
+    // sema_down(&global);
     int exec_pid = process_execute(file_name);
-    sema_up(&global);
+    // sema_up(&global);
     return exec_pid;
 }
 static bool syscall_create(const char *file, unsigned initial_size){
@@ -49,9 +49,9 @@ static bool syscall_remove(const char *file){
 }
 static int syscall_open(const char *file){
     struct file* ptr = NULL;
-    // sema_down(&global);
+    sema_down(&global);
     ptr = filesys_open(file);
-    // sema_up(&global);
+    sema_up(&global);
 
     if(ptr == NULL){
         return -1;
