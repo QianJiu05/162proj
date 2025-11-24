@@ -17,7 +17,9 @@
 #error TIMER_FREQ <= 1000 recommended
 #endif
 
-/* Number of timer ticks since OS booted. */
+/* Number of timer ticks since OS booted.
+int64_t max is 2^63-1, roundly 9.22*10^18
+按照一般FREQ为100hz来算需要2.9亿年才会溢出，不用担心 */
 static int64_t ticks;
 
 /* Number of loops per timer tick.
@@ -37,18 +39,17 @@ void timer_init(void) {
   intr_register_ext(0x20, timer_interrupt, "8254 Timer");
 }
 
-/* Calibrates loops_per_tick, used to implement brief delays. */
+/* 校准 loops_per_tick, used to implement brief delays. */
 void timer_calibrate(void) {
   unsigned high_bit, test_bit;
 
   ASSERT(intr_get_level() == INTR_ON);
   printf("Calibrating timer...  ");
 
-  /* Approximate loops_per_tick as the largest power-of-two
-     still less than one timer tick. */
-  loops_per_tick = 1u << 10;
+  /* 将loops_per_tick近似为小于一个定时器周期内的最大二的幂。 */
+  loops_per_tick = 1u << 10;//假设至少能在一个tick内跑完1024次
   while (!too_many_loops(loops_per_tick << 1)) {
-    loops_per_tick <<= 1;
+    loops_per_tick <<= 1;//翻倍跑试试
     ASSERT(loops_per_tick != 0);
   }
 

@@ -55,30 +55,19 @@ typedef int tid_t;
              |              status             |
         0 kB +---------------------------------+
 
-   The upshot of this is twofold:
+   这一点的结论有两个方面：
 
-      1. First, `struct thread' must not be allowed to grow too
-         big.  If it does, then there will not be enough room for
-         the kernel stack.  Our base `struct thread' is only a
-         few bytes in size.  It probably should stay well under 1
-         kB.
+1. 首先，`struct thread` 不能太大。如果太大，就没有足够的空间放置内核栈。
+  我们的基础 `struct thread` 只有几字节大小。它可能应该保持在 1 kB 以下。
 
-      2. Second, kernel stacks must not be allowed to grow too
-         large.  If a stack overflows, it will corrupt the thread
-         state.  Thus, kernel functions should not allocate large
-         structures or arrays as non-static local variables.  Use
-         dynamic allocation with malloc() or palloc_get_page()
-         instead.
+2. 其次，内核栈不能太大。如果栈溢出，会破坏线程状态。
+  因此，内核函数不应将大型结构体或数组作为非静态局部变量分配。
+  应使用 malloc() 或 palloc_get_page() 进行动态分配。
 
-   The first symptom of either of these problems will probably be
-   an assertion failure in thread_current(), which checks that
-   the `magic' member of the running thread's `struct thread' is
-   set to THREAD_MAGIC.  Stack overflow will normally change this
-   value, triggering the assertion.
-   这两个问题的第一个症状可能是thread_current() 中的断言失败，
-   该断言检查正在运行的线程的“struct thread”中的“magic”成员是否
-   设置为 THREAD_MAGIC。堆栈溢出通常会更改此值，从而触发断言。
-   */
+  这两个问题的第一个症状可能是thread_current() 中的断言失败，
+  该断言检查正在运行的线程的“struct thread”中的“magic”成员是否
+  设置为 THREAD_MAGIC。堆栈溢出通常会更改此值，从而触发断言。
+  */
 /* The `elem' member has a dual purpose.  It can be an element in
    the run queue (thread.c), or it can be an element in a
    semaphore wait list (synch.c).  It can be used these two ways
