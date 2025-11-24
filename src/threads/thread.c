@@ -90,19 +90,12 @@ scheduler_func* scheduler_jump_table[8] = {thread_schedule_fifo,     thread_sche
                                            thread_schedule_reserved, thread_schedule_reserved,
                                            thread_schedule_reserved, thread_schedule_reserved};
 
-/* Initializes the threading system by transforming the code
-   that's currently running into a thread.  This can't work in
-   general and it is possible in this case only because loader.S
-   was careful to put the bottom of the stack at a page boundary.
-
-   Also initializes the run queue and the tid lock.
-
-   After calling this function, be sure to initialize the page
-   allocator before trying to create any threads with
-   thread_create().
-
-   It is not safe to call thread_current() until this function
-   finishes. */
+/* 通过将当前正在运行的代码转换为线程来初始化线程系统。这通常行不通，
+  之所以在此例中可行，是因为 loader.S特意将栈底放置在了页面边界。
+  同时初始化运行队列和线程锁。
+  调用此函数后，请务必先初始化页面分配器，
+  然后再尝试使用 thread_create() 创建任何线程。
+  在此函数完成之前，调用 thread_current() 是不安全的。 */
 void thread_init(void) {
   ASSERT(intr_get_level() == INTR_OFF);
 
@@ -265,11 +258,9 @@ const char* thread_name(void) { return thread_current()->name; }
 struct thread* thread_current(void) {
   struct thread* t = running_thread();
 
-  /* Make sure T is really a thread.
-     If either of these assertions fire, then your thread may
-     have overflowed its stack.  Each thread has less than 4 kB
-     of stack, so a few big automatic arrays or moderate
-     recursion can cause stack overflow. */
+/* 请确保 T 确实是一个线程。如果这两个断言中的任何一个触发，则您的线程可能
+  发生了栈溢出。每个线程的栈空间小于 4 kB，因此几个大型自动数组或适度的
+  递归操作都可能导致栈溢出。 */
   ASSERT(is_thread(t));
   ASSERT(t->status == THREAD_RUNNING);
 
