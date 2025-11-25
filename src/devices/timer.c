@@ -8,6 +8,8 @@
 #include "threads/synch.h"
 #include "threads/thread.h"
 
+#include <list.h>
+
 /* See [8254] for hardware details of the 8254 timer chip. */
 
 #if TIMER_FREQ < 19
@@ -22,6 +24,13 @@ int64_t max is 2^63-1, roundly 9.22*10^18
 按照一般FREQ为100hz来算需要2.9亿年才会溢出，不用担心 */
 static int64_t ticks;
 
+struct list sleep_list;
+struct lock lock_for_list;
+struct sleep_elem{
+    int64_t target_tick;    /* 目标睡眠时间 */
+    struct semaphore sema;  /* 信号量用于睡眠 */
+    struct list_elem elem;
+};
 /* Number of loops per timer tick.
    Initialized by timer_calibrate(). */
 static unsigned loops_per_tick;
@@ -35,8 +44,10 @@ static void real_time_delay(int64_t num, int32_t denom);
 /* Sets up the timer to interrupt TIMER_FREQ times per second,
    and registers the corresponding interrupt. */
 void timer_init(void) {
-  pit_configure_channel(0, 2, TIMER_FREQ);
-  intr_register_ext(0x20, timer_interrupt, "8254 Timer");
+    pit_configure_channel(0, 2, TIMER_FREQ);
+    intr_register_ext(0x20, timer_interrupt, "8254 Timer");
+    list_init(&sleep_list);
+    lock_init(&lock_for_list);
 }
 
 /* 校准 loops_per_tick, used to implement brief delays. */
@@ -77,11 +88,36 @@ int64_t timer_elapsed(int64_t then) { return timer_ticks() - then; }
 /* Sleeps for approximately TICKS timer ticks.  Interrupts must
    be turned on. */
 void timer_sleep(int64_t ticks) {
-  int64_t start = timer_ticks();
+    int64_t start = timer_ticks();
 
-  ASSERT(intr_get_level() == INTR_ON);
-  while (timer_elapsed(start) < ticks)
-    thread_yield();
+    ASSERT(intr_get_level() == INTR_ON);
+
+    if(ticks <= 0)return;
+
+    int64_t target = start + ticks;
+
+    /* 局部变量，在线程的栈上分配 */
+    struct sleep_elem new;
+    new.target_tick = target;
+    sema_init(&new.sema,0);
+
+    /* 睡眠列表为空直接push_front */
+    enum intr_level old_level = intr_disable();
+    /* 当 > taget就直接break. 这样遍历结束后一定是插入的位置 */
+    struct list_elem* e = list_begin(&sleep_list);
+    struct sleep_elem* this = NULL;
+    while(e != list_end(&sleep_list)){
+        this = list_entry(e,struct sleep_elem,elem);
+        /* 大了，不用往后找了 */
+        if(target < this->target_tick){
+            break;
+        }
+        e = list_next(e);
+    }
+    list_insert(e,&new.elem);
+    sema_down(&new.sema);
+    /* 醒了之后开中断 */
+    intr_set_level(old_level);
 }
 
 /* Sleeps for approximately MS milliseconds.  Interrupts must be
@@ -130,6 +166,21 @@ void timer_print_stats(void) { printf("Timer: %" PRId64 " ticks\n", timer_ticks(
 static void timer_interrupt(struct intr_frame* args UNUSED) {
   ticks++;
   thread_tick();
+
+  if(list_empty(&sleep_list))return;
+
+  struct list_elem* e = list_begin(&sleep_list);
+  while(e != list_end(&sleep_list)){
+      struct sleep_elem* cur = list_entry(e,struct sleep_elem,elem);
+        /* 大了，不用往后找了 */
+        if(cur->target_tick <= ticks){
+            sema_up(&cur->sema);
+            /* list_rm会返回原节点的next节点 */
+            e = list_remove(&cur->elem);
+        }else{
+            break;
+        }
+  }
 }
 
 /* Returns true if LOOPS iterations waits for more than one timer
