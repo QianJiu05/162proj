@@ -21,11 +21,11 @@
 
 /* Number of timer ticks since OS booted.
 int64_t max is 2^63-1, roundly 9.22*10^18
-按照一般FREQ为100hz来算需要2.9亿年才会溢出，不用担心 */
+按照一般FREQ为100hz来算需要2.9亿年才会溢出 */
 static int64_t ticks;
 
 struct list sleep_list;
-struct lock lock_for_list;
+// struct lock lock_for_list;
 struct sleep_elem{
     int64_t target_tick;    /* 目标睡眠时间 */
     struct semaphore sema;  /* 信号量用于睡眠 */
@@ -47,7 +47,6 @@ void timer_init(void) {
     pit_configure_channel(0, 2, TIMER_FREQ);
     intr_register_ext(0x20, timer_interrupt, "8254 Timer");
     list_init(&sleep_list);
-    lock_init(&lock_for_list);
 }
 
 /* 校准 loops_per_tick, used to implement brief delays. */
@@ -93,7 +92,6 @@ void timer_sleep(int64_t ticks) {
     ASSERT(intr_get_level() == INTR_ON);
 
     if(ticks <= 0)return;
-
     int64_t target = start + ticks;
 
     /* 局部变量，在线程的栈上分配 */
@@ -101,22 +99,22 @@ void timer_sleep(int64_t ticks) {
     new.target_tick = target;
     sema_init(&new.sema,0);
 
-    /* 睡眠列表为空直接push_front */
+    /* 关中断 */
     enum intr_level old_level = intr_disable();
     /* 当 > taget就直接break. 这样遍历结束后一定是插入的位置 */
     struct list_elem* e = list_begin(&sleep_list);
-    struct sleep_elem* this = NULL;
+    struct sleep_elem* cur = NULL;
     while(e != list_end(&sleep_list)){
-        this = list_entry(e,struct sleep_elem,elem);
-        /* 大了，不用往后找了 */
-        if(target < this->target_tick){
+        cur = list_entry(e,struct sleep_elem,elem);
+        if(target < cur->target_tick){
             break;
         }
         e = list_next(e);
     }
     list_insert(e,&new.elem);
     sema_down(&new.sema);
-    /* 醒了之后开中断 */
+    /* 醒了之后开中断，中断仅作用于当前线程，
+    睡眠时发生了线程切换，切到了其他线程 */
     intr_set_level(old_level);
 }
 
