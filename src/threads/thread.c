@@ -23,6 +23,7 @@
 /* List of processes in THREAD_READY state, that is, processes
    that are ready to run but not actually running. */
 static struct list fifo_ready_list;
+static struct list prio_ready_list;
 
 /* List of all processes.  Processes are added to this list
    when they are first scheduled and removed when they exit. */
@@ -100,7 +101,11 @@ void thread_init(void) {
   ASSERT(intr_get_level() == INTR_OFF);
 
   lock_init(&tid_lock);
-  list_init(&fifo_ready_list);
+  if(active_sched_policy == SCHED_FIFO){
+      list_init(&fifo_ready_list);
+  }else if(active_sched_policy == SCHED_PRIO){
+      list_init(&prio_ready_list);
+  }
   list_init(&all_list);
 
   /* Set up a thread structure for the running thread. */
@@ -215,18 +220,43 @@ void thread_block(void) {
   schedule();
 }
 
+/* compare helper */
+static bool priority_compare(const struct list_elem* a, const struct list_elem* b, void* aux UNUSED){
+   struct thread* cur_a = list_entry(a,struct thread,elem);
+   struct thread* cur_b = list_entry(b,struct thread,elem);
+   if(cur_a->priority > cur_b->priority){return true;}
+   return false;
+}
+
 /* Places a thread on the ready structure appropriate for the
    current active scheduling policy.
-   
    This function must be called with interrupts turned off. */
 static void thread_enqueue(struct thread* t) {
   ASSERT(intr_get_level() == INTR_OFF);
   ASSERT(is_thread(t));
 
-  if (active_sched_policy == SCHED_FIFO)
-    list_push_back(&fifo_ready_list, &t->elem);
-  else
-    PANIC("Unimplemented scheduling policy value: %d", active_sched_policy);
+  if (active_sched_policy == SCHED_FIFO){
+      list_push_back(&fifo_ready_list, &t->elem);
+  }else if(active_sched_policy == SCHED_PRIO){
+      list_insert_ordered(&prio_ready_list,&t->elem,priority_compare,NULL);
+
+      printf("==============execute insert==============\n");
+      struct thread* cur = NULL;
+      struct list_elem* e = NULL;
+      for(e = list_begin(&prio_ready_list);e != list_end(&prio_ready_list);
+              e = list_next(e))
+      {
+          cur = list_entry(e,struct thread,elem);
+          printf("tid = %d,prio = %d\n",cur->tid,cur->priority);
+          // if(cur->priority < t->priority){
+          //     break;
+          // }
+      }
+      // /* 把t插到cur前面 */
+      // list_insert(e,&t->elem);
+  }else{
+      PANIC("Unimplemented scheduling policy value: %d", active_sched_policy);
+  }
 }
 
 /* Transitions a blocked thread T to the ready-to-run state.
@@ -445,7 +475,10 @@ static struct thread* thread_schedule_fifo(void) {
 
 /* Strict priority scheduler */
 static struct thread* thread_schedule_prio(void) {
-  PANIC("Unimplemented scheduler policy: \"-sched=prio\"");
+    if (!list_empty(&prio_ready_list))
+    return list_entry(list_pop_front(&prio_ready_list), struct thread, elem);
+  else
+    return idle_thread;
 }
 
 /* Fair priority scheduler */
@@ -464,11 +497,10 @@ static struct thread* thread_schedule_reserved(void) {
   PANIC("Invalid scheduler policy value: %d", active_sched_policy);
 }
 
-/* Chooses and returns the next thread to be scheduled.  Should
-   return a thread from the run queue, unless the run queue is
-   empty.  (If the running thread can continue running, then it
-   will be in the run queue.)  If the run queue is empty, return
-   idle_thread. */
+/* 选择并返回下一个要调度的线程。
+  应该从运行队列中返回一个线程，除非运行队列为空。
+  （如果正在运行的线程可以继续运行，那么它将位于运行队列中。）
+  如果运行队列为空，则返回空闲线程。 */
 static struct thread* next_thread_to_run(void) {
   return (scheduler_jump_table[active_sched_policy])();
 }
@@ -516,13 +548,11 @@ void thread_switch_tail(struct thread* prev) {
   }
 }
 
-/* Schedules a new thread.  At entry, interrupts must be off and
-   the running process's state must have been changed from
-   running to some other state.  This function finds another
-   thread to run and switches to it.
-
-   It's not safe to call printf() until thread_switch_tail()
-   has completed. */
+/* 调度一个新线程。进入此函数时，中断必须关闭，
+并且当前运行进程的状态必须已从运行状态更改为其他状态。
+此函数会找到另一个线程来运行并切换到该线程。
+在 `thread_switch_tail()` 函数执行完毕之前，
+调用 `printf()` 函数是不安全的。 */
 static void schedule(void) {
   struct thread* cur = running_thread();
   struct thread* next = next_thread_to_run();

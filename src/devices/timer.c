@@ -84,6 +84,13 @@ int64_t timer_ticks(void) {
    should be a value once returned by timer_ticks(). */
 int64_t timer_elapsed(int64_t then) { return timer_ticks() - then; }
 
+/* compare helper tick应该从小到大排序*/
+static bool tick_compare(const struct list_elem* a, const struct list_elem* b, void* aux UNUSED){
+   struct sleep_elem* cur_a = list_entry(a,struct sleep_elem,elem);
+   struct sleep_elem* cur_b = list_entry(b,struct sleep_elem,elem);
+   if(cur_a->target_tick < cur_b->target_tick){return true;}
+   return false;
+}
 /* Sleeps for approximately TICKS timer ticks.  Interrupts must
    be turned on. */
 void timer_sleep(int64_t ticks) {
@@ -101,17 +108,7 @@ void timer_sleep(int64_t ticks) {
 
     /* 关中断 */
     enum intr_level old_level = intr_disable();
-    /* 当 > taget就直接break. 这样遍历结束后一定是插入的位置 */
-    struct list_elem* e = list_begin(&sleep_list);
-    struct sleep_elem* cur = NULL;
-    while(e != list_end(&sleep_list)){
-        cur = list_entry(e,struct sleep_elem,elem);
-        if(target < cur->target_tick){
-            break;
-        }
-        e = list_next(e);
-    }
-    list_insert(e,&new.elem);
+    list_insert_ordered(&sleep_list,&new.elem,tick_compare,NULL);
     sema_down(&new.sema);
     /* 醒了之后开中断，中断仅作用于当前线程，
     睡眠时发生了线程切换，切到了其他线程 */

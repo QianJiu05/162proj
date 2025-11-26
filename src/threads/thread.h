@@ -106,6 +106,7 @@ enum sched_policy {
   SCHED_MLFQS, // Multi-level Feedback Queue Scheduler
 };
 #define SCHED_DEFAULT SCHED_FIFO
+// #define SCHED_DEFAULT SCHED_PRIO
 
 /* Determines which scheduling policy the kernel should use.
  * Controller by the kernel command-line options

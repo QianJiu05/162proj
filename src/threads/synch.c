@@ -48,6 +48,12 @@ void sema_init(struct semaphore* sema, unsigned value) {
   list_init(&sema->waiters);
 }
 
+static bool priority_compare(const struct list_elem* a, const struct list_elem* b, void* aux UNUSED){
+   struct thread* cur_a = list_entry(a,struct thread,elem);
+   struct thread* cur_b = list_entry(b,struct thread,elem);
+   if(cur_a->priority < cur_b->priority){return true;}
+   return false;
+}
 /* Down or "P" operation on a semaphore.  Waits for SEMA's value
    to become positive and then atomically decrements it.
 
@@ -63,7 +69,8 @@ void sema_down(struct semaphore* sema) {
 
   old_level = intr_disable();
   while (sema->value == 0) {
-    list_push_back(&sema->waiters, &thread_current()->elem);
+    list_insert_ordered(&sema->waiters,&thread_current()->elem,priority_compare,NULL);
+    // list_push_back(&sema->waiters, &thread_current()->elem);
     thread_block();
   }
   sema->value--;
@@ -161,14 +168,10 @@ void lock_init(struct lock* lock) {
   sema_init(&lock->semaphore, 1);
 }
 
-/* Acquires LOCK, sleeping until it becomes available if
-   necessary.  The lock must not already be held by the current
-   thread.
-
-   This function may sleep, so it must not be called within an
-   interrupt handler.  This function may be called with
-   interrupts disabled, but interrupts will be turned back on if
-   we need to sleep. */
+/* 获取锁，必要时会休眠直至锁可用。当前线程不得持有该锁。
+  此函数可能会休眠，因此不得在中断处理程序中调用。
+  可以在禁用中断的情况下调用此函数，
+  但如果需要休眠，中断将被重新启用。 */
 void lock_acquire(struct lock* lock) {
   ASSERT(lock != NULL);
   ASSERT(!intr_context());
