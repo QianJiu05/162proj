@@ -206,12 +206,8 @@ tid_t thread_create(const char* name, int priority, thread_func* function, void*
   return tid;
 }
 
-/* Puts the current thread to sleep.  It will not be scheduled
-   again until awoken by thread_unblock().
-
-   This function must be called with interrupts turned off.  It
-   is usually a better idea to use one of the synchronization
-   primitives in synch.h. */
+/* 使当前线程进入睡眠状态。除非被 `thread_unblock()` 唤醒，否则它将不会被再次调度执行。
+  调用此函数时必须关闭中断。通常最好使用 `synch.h` 中的同步原语。 */
 void thread_block(void) {
   ASSERT(!intr_context());
   ASSERT(intr_get_level() == INTR_OFF);
@@ -224,8 +220,7 @@ void thread_block(void) {
 static bool priority_compare(const struct list_elem* a, const struct list_elem* b, void* aux UNUSED){
    struct thread* cur_a = list_entry(a,struct thread,elem);
    struct thread* cur_b = list_entry(b,struct thread,elem);
-   if(cur_a->priority > cur_b->priority){return true;}
-   return false;
+   return cur_a->priority > cur_b->priority;
 }
 
 /* Places a thread on the ready structure appropriate for the
@@ -239,34 +234,26 @@ static void thread_enqueue(struct thread* t) {
       list_push_back(&fifo_ready_list, &t->elem);
   }else if(active_sched_policy == SCHED_PRIO){
       list_insert_ordered(&prio_ready_list,&t->elem,priority_compare,NULL);
-
-      printf("==============execute insert==============\n");
-      struct thread* cur = NULL;
-      struct list_elem* e = NULL;
-      for(e = list_begin(&prio_ready_list);e != list_end(&prio_ready_list);
-              e = list_next(e))
-      {
-          cur = list_entry(e,struct thread,elem);
-          printf("tid = %d,prio = %d\n",cur->tid,cur->priority);
-          // if(cur->priority < t->priority){
-          //     break;
-          // }
-      }
-      // /* 把t插到cur前面 */
-      // list_insert(e,&t->elem);
+      // printf("==============execute insert==============\n");
+      // struct thread* cur = NULL;
+      // struct list_elem* e = NULL;
+      // for(e = list_begin(&prio_ready_list);e != list_end(&prio_ready_list);
+      //         e = list_next(e))
+      // {
+      //     cur = list_entry(e,struct thread,elem);
+      //     printf("tid = %d,prio = %d\n",cur->tid,cur->priority);
+      // }
   }else{
       PANIC("Unimplemented scheduling policy value: %d", active_sched_policy);
   }
 }
 
-/* Transitions a blocked thread T to the ready-to-run state.
-   This is an error if T is not blocked.  (Use thread_yield() to
-   make the running thread ready.)
-
-   This function does not preempt the running thread.  This can
-   be important: if the caller had disabled interrupts itself,
-   it may expect that it can atomically unblock a thread and
-   update other data. */
+/* 将阻塞的线程 T 转换为就绪状态。
+  如果 T 未被阻塞，则此操作会出错。
+  （请使用 `thread_yield()` 函数使正在运行的线程就绪。）
+  此函数不会抢占正在运行的线程。这一点可能
+  很重要：如果调用者禁用了中断，
+  它可能会期望能够原子地解除线程阻塞并更新其他数据。 */
 void thread_unblock(struct thread* t) {
   enum intr_level old_level;
 

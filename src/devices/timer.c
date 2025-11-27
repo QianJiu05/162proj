@@ -88,8 +88,7 @@ int64_t timer_elapsed(int64_t then) { return timer_ticks() - then; }
 static bool tick_compare(const struct list_elem* a, const struct list_elem* b, void* aux UNUSED){
    struct sleep_elem* cur_a = list_entry(a,struct sleep_elem,elem);
    struct sleep_elem* cur_b = list_entry(b,struct sleep_elem,elem);
-   if(cur_a->target_tick < cur_b->target_tick){return true;}
-   return false;
+   return cur_a->target_tick < cur_b->target_tick;
 }
 /* Sleeps for approximately TICKS timer ticks.  Interrupts must
    be turned on. */
@@ -104,15 +103,33 @@ void timer_sleep(int64_t ticks) {
     /* 局部变量，在线程的栈上分配 */
     struct sleep_elem new;
     new.target_tick = target;
+   //  printf("taget = %d\n",target);
     sema_init(&new.sema,0);
 
     /* 关中断 */
     enum intr_level old_level = intr_disable();
     list_insert_ordered(&sleep_list,&new.elem,tick_compare,NULL);
+
+/* FOR DEBUG. INSERT CORRECT 
+tick = 329, tick = 339, tick = 349, tick = 359, tick = 369, tick = 525*/
+      // printf("==============tick insert==============\n");
+      // struct sleep_elem* cur = NULL;
+      // struct list_elem* e = NULL;
+      // for(e = list_begin(&sleep_list);e != list_end(&sleep_list);
+      //         e = list_next(e))
+      // {
+      //     cur = list_entry(e,struct sleep_elem,elem);
+      //     printf("tick = %d, ",cur->target_tick);
+      // }
+      // printf("\n");
+
     sema_down(&new.sema);
     /* 醒了之后开中断，中断仅作用于当前线程，
     睡眠时发生了线程切换，切到了其他线程 */
     intr_set_level(old_level);
+
+          
+
 }
 
 /* Sleeps for approximately MS milliseconds.  Interrupts must be

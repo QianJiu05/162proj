@@ -48,11 +48,11 @@ void sema_init(struct semaphore* sema, unsigned value) {
   list_init(&sema->waiters);
 }
 
+/* 大的排在前面 */
 static bool priority_compare(const struct list_elem* a, const struct list_elem* b, void* aux UNUSED){
    struct thread* cur_a = list_entry(a,struct thread,elem);
    struct thread* cur_b = list_entry(b,struct thread,elem);
-   if(cur_a->priority < cur_b->priority){return true;}
-   return false;
+   return cur_a->priority > cur_b->priority;
 }
 /* Down or "P" operation on a semaphore.  Waits for SEMA's value
    to become positive and then atomically decrements it.
@@ -69,8 +69,8 @@ void sema_down(struct semaphore* sema) {
 
   old_level = intr_disable();
   while (sema->value == 0) {
+    /* 按大在前插入 */
     list_insert_ordered(&sema->waiters,&thread_current()->elem,priority_compare,NULL);
-    // list_push_back(&sema->waiters, &thread_current()->elem);
     thread_block();
   }
   sema->value--;
@@ -105,14 +105,24 @@ bool sema_try_down(struct semaphore* sema) {
    This function may be called from an interrupt handler. */
 void sema_up(struct semaphore* sema) {
   enum intr_level old_level;
+  struct thread* t = NULL;
 
   ASSERT(sema != NULL);
 
   old_level = intr_disable();
-  if (!list_empty(&sema->waiters))
-    thread_unblock(list_entry(list_pop_front(&sema->waiters), struct thread, elem));
+  if (!list_empty(&sema->waiters)){
+    t = list_entry(list_pop_front(&sema->waiters), struct thread, elem);
+    /* 把waiter的首个线程就绪 */
+    thread_unblock(t);
+  }
   sema->value++;
   intr_set_level(old_level);
+  /* 如果情况合适的话发起调度 */
+  if(t != NULL && t->priority > thread_current()->priority){
+      if (!intr_context()) {  /* 不在中断上下文中才能 yield */
+          thread_yield();
+      }
+  }
 }
 
 static void sema_test_helper(void* sema_);
@@ -177,14 +187,24 @@ void lock_acquire(struct lock* lock) {
   ASSERT(!intr_context());
   ASSERT(!lock_held_by_current_thread(lock));
 
+  struct thread* cur = thread_current();
+  
+  /* 关中断 */
+  enum intr_level old_level = intr_disable();
+  if(lock->holder != NULL && lock->holder->priority < cur->priority){
+      lock->holder->priority = cur->priority;
+  }
+  /* 进入睡眠等待 */
   sema_down(&lock->semaphore);
+
   lock->holder = thread_current();
+  intr_set_level(old_level);
+
 }
 
 /* Tries to acquires LOCK and returns true if successful or false
    on failure.  The lock must not already be held by the current
    thread.
-
    This function will not sleep, so it may be called within an
    interrupt handler. */
 bool lock_try_acquire(struct lock* lock) {
@@ -199,22 +219,22 @@ bool lock_try_acquire(struct lock* lock) {
   return success;
 }
 
-/* Releases LOCK, which must be owned by the current thread.
-
-   An interrupt handler cannot acquire a lock, so it does not
-   make sense to try to release a lock within an interrupt
-   handler. */
+/* 释放锁，该锁必须由当前线程持有。
+  中断处理程序无法获取锁，因此在中断处理程序中尝试释放锁是没有意义的。 */
 void lock_release(struct lock* lock) {
   ASSERT(lock != NULL);
   ASSERT(lock_held_by_current_thread(lock));
 
+  enum intr_level old_level = intr_disable();
+  /* 恢复当前线程的prio */
+  thread_current()->priority = thread_current()->origin_priority;
   lock->holder = NULL;
   sema_up(&lock->semaphore);
+  intr_set_level(old_level);
 }
 
-/* Returns true if the current thread holds LOCK, false
-   otherwise.  (Note that testing whether some other thread holds
-   a lock would be racy.) */
+/* 如果当前线程持有 LOCK，则返回 true，否则返回 false。
+（请注意，测试其他线程是否持有 LOCK 是存在竞争条件的。）*/
 bool lock_held_by_current_thread(const struct lock* lock) {
   ASSERT(lock != NULL);
 
