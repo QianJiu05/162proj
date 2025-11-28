@@ -99,7 +99,7 @@ bool sema_try_down(struct semaphore* sema) {
   return success;
 }
 
-static struct thread* get_max_priority(struct list* list){
+struct thread* get_max_priority(struct list* list){
     int max_prio = -1;
     struct thread* max_t = NULL;
     struct list_elem* max_elem = NULL;

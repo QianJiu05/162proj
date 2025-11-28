@@ -16,6 +16,7 @@ bool sema_try_down(struct semaphore*);
 void sema_up(struct semaphore*);
 void sema_self_test(void);
 
+struct thread* get_max_priority(struct list* list); /* 找到最大优先级的线程 */
 /* Lock. */
 struct lock {
   struct thread* holder;      /* Thread holding lock (for debugging). */

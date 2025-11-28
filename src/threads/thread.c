@@ -101,11 +101,12 @@ void thread_init(void) {
   ASSERT(intr_get_level() == INTR_OFF);
 
   lock_init(&tid_lock);
-  if(active_sched_policy == SCHED_FIFO){
+  if(active_sched_policy == SCHED_FIFO || active_sched_policy == SCHED_PRIO){
       list_init(&fifo_ready_list);
-  }else if(active_sched_policy == SCHED_PRIO){
-      list_init(&prio_ready_list);
   }
+  // else if(active_sched_policy == SCHED_PRIO){
+  //     list_init(&prio_ready_list);
+  // }
   list_init(&all_list);
 
   /* Set up a thread structure for the running thread. */
@@ -240,11 +241,14 @@ static void thread_enqueue(struct thread* t) {
   ASSERT(intr_get_level() == INTR_OFF);
   ASSERT(is_thread(t));
 
-  if (active_sched_policy == SCHED_FIFO){
+  /* prio可以直接复用fifo的list，因为插入时是不需要有序的 */
+  if (active_sched_policy == SCHED_FIFO || active_sched_policy == SCHED_PRIO){
       list_push_back(&fifo_ready_list, &t->elem);
-  }else if(active_sched_policy == SCHED_PRIO){
-      list_insert_ordered(&prio_ready_list,&t->elem,priority_compare,NULL);
-  }else{
+  }
+  // else if(active_sched_policy == SCHED_PRIO){
+  //     list_insert_ordered(&prio_ready_list,&t->elem,priority_compare,NULL);
+  // }
+  else{
       PANIC("Unimplemented scheduling policy value: %d", active_sched_policy);
   }
 }
@@ -476,8 +480,11 @@ static struct thread* thread_schedule_fifo(void) {
 
 /* Strict priority scheduler */
 static struct thread* thread_schedule_prio(void) {
-    if (!list_empty(&prio_ready_list))
-    return list_entry(list_pop_front(&prio_ready_list), struct thread, elem);
+    // if (!list_empty(&prio_ready_list))
+    if (!list_empty(&fifo_ready_list)){
+        return get_max_priority(&fifo_ready_list);
+    }
+    // return list_entry(list_pop_front(&prio_ready_list), struct thread, elem);
   else
     return idle_thread;
 }
