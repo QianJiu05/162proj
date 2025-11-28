@@ -86,6 +86,7 @@ struct thread {
 
   /* Shared between thread.c and synch.c. */
   struct list_elem elem; /* List element. */
+  struct lock* waiting_lock;  /* 正在等待的锁 */
 
 #ifdef USERPROG
   /* Owned by process.c. */

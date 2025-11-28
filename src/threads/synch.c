@@ -177,7 +177,15 @@ void lock_init(struct lock* lock) {
   lock->holder = NULL;
   sema_init(&lock->semaphore, 1);
 }
-
+void lock_prio_donate(struct lock* lock,struct thread* t){
+    if(lock == NULL || lock->holder == NULL){
+        return;
+    }
+    if(lock->holder->priority < t->priority){
+      lock->holder->priority = t->priority;
+      lock_prio_donate(lock->holder->waiting_lock,lock->holder);
+    }
+}
 /* 获取锁，必要时会休眠直至锁可用。当前线程不得持有该锁。
   此函数可能会休眠，因此不得在中断处理程序中调用。
   可以在禁用中断的情况下调用此函数，
@@ -188,18 +196,18 @@ void lock_acquire(struct lock* lock) {
   ASSERT(!lock_held_by_current_thread(lock));
 
   struct thread* cur = thread_current();
-  
   /* 关中断 */
   enum intr_level old_level = intr_disable();
   if(lock->holder != NULL && lock->holder->priority < cur->priority){
-      lock->holder->priority = cur->priority;
+      // lock->holder->priority = cur->priority;
+      lock_prio_donate(lock,cur);
   }
+  cur->waiting_lock = lock;
   /* 进入睡眠等待 */
   sema_down(&lock->semaphore);
 
   lock->holder = thread_current();
   intr_set_level(old_level);
-
 }
 
 /* Tries to acquires LOCK and returns true if successful or false
@@ -227,7 +235,9 @@ void lock_release(struct lock* lock) {
 
   enum intr_level old_level = intr_disable();
   /* 恢复当前线程的prio */
-  thread_current()->priority = thread_current()->origin_priority;
+  struct thread* cur = thread_current();
+  cur->priority = cur->origin_priority;
+  cur->waiting_lock = NULL;
   lock->holder = NULL;
   sema_up(&lock->semaphore);
   intr_set_level(old_level);
