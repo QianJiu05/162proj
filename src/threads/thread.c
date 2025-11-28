@@ -203,6 +203,11 @@ tid_t thread_create(const char* name, int priority, thread_func* function, void*
   /* Add to run queue. */
   thread_unblock(t);
 
+  /* 如果新建的优先级高于当前优先级，立即抢占 */
+  if(t->priority > thread_current()->priority){
+      thread_yield();
+  }
+
   return tid;
 }
 
