@@ -113,7 +113,8 @@ void thread_init(void) {
   init_thread(initial_thread, "main", PRI_DEFAULT);
   initial_thread->status = THREAD_RUNNING;
   initial_thread->tid = allocate_tid();
-  initial_thread->waiting_lock = NULL;
+  // initial_thread->waiting_lock = NULL;
+  // list_init(&initial_thread->holding_lock);
 }
 
 /* Starts preemptive thread scheduling by enabling interrupts.
@@ -204,6 +205,9 @@ tid_t thread_create(const char* name, int priority, thread_func* function, void*
   /* Add to run queue. */
   thread_unblock(t);
 
+  // printf("CREATE: %s (pri=%d), current=%s (pri=%d)\n", 
+  //      name, t->priority, thread_current()->name, thread_current()->priority);
+       
   /* 如果新建的优先级高于当前优先级，立即抢占 */
   if(t->priority > thread_current()->priority){
       thread_yield();
@@ -335,7 +339,7 @@ void thread_set_priority(int new_priority) {
     int old_priority = cur->priority;
     cur->priority = new_priority; 
     /* 只有当优先级降低了，才可能被抢占，提高不会(否则不会运行当前线程) */
-    if(old_priority > new_priority){
+    if(active_sched_policy == SCHED_PRIO && old_priority > new_priority){
         thread_yield();
     }
 }
@@ -441,6 +445,8 @@ static void init_thread(struct thread* t, const char* name, int priority) {
   t->origin_priority = priority;
   t->pcb = NULL;
   t->magic = THREAD_MAGIC;
+  t->waiting_lock = NULL;           /* ⭐ 添加初始化 */
+  list_init(&t->holding_lock);      /* ⭐ 添加初始化 */
 
   old_level = intr_disable();
   list_push_back(&all_list, &t->allelem);

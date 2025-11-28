@@ -39,10 +39,12 @@ void test_priority_donate_multiple2(void) {
   lock_acquire(&a);
   lock_acquire(&b);
 
+  //让a等待main的lock_a
   thread_create("a", PRI_DEFAULT + 3, a_thread_func, &a);
   msg("Main thread should have priority %d.  Actual priority: %d.", PRI_DEFAULT + 3,
       thread_get_priority());
-
+  
+  //这里C创建完直接运行了，不应该
   thread_create("c", PRI_DEFAULT + 1, c_thread_func, NULL);
 
   thread_create("b", PRI_DEFAULT + 5, b_thread_func, &b);

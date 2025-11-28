@@ -33,14 +33,15 @@ void test_priority_donate_multiple(void) {
   lock_acquire(&a);
   lock_acquire(&b);
 
+  //a试图获得锁(未果)，把main的prio改成32
   thread_create("a", PRI_DEFAULT + 1, a_thread_func, &a);
   msg("Main thread should have priority %d.  Actual priority: %d.", PRI_DEFAULT + 1,
       thread_get_priority());
-
+  //b试图获得锁(未果)，把main的prio改成33
   thread_create("b", PRI_DEFAULT + 2, b_thread_func, &b);
   msg("Main thread should have priority %d.  Actual priority: %d.", PRI_DEFAULT + 2,
       thread_get_priority());
-
+  //main释放锁b，此时只有a等main，要把prio改回32
   lock_release(&b);
   msg("Thread b should have just finished.");
   msg("Main thread should have priority %d.  Actual priority: %d.", PRI_DEFAULT + 1,

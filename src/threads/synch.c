@@ -110,14 +110,16 @@ void sema_up(struct semaphore* sema) {
   ASSERT(sema != NULL);
 
   old_level = intr_disable();
+
   if (!list_empty(&sema->waiters)){
     t = list_entry(list_pop_front(&sema->waiters), struct thread, elem);
     /* 把waiter的首个线程就绪 */
     thread_unblock(t);
   }
   sema->value++;
+
   intr_set_level(old_level);
-  /* 如果情况合适的话发起调度 */
+  /* 如果刚才就绪的线程优先级更高，发起调度 */
   if(t != NULL && t->priority > thread_current()->priority){
       if (!intr_context()) {  /* 不在中断上下文中才能 yield */
           thread_yield();
@@ -175,17 +177,27 @@ void lock_init(struct lock* lock) {
   ASSERT(lock != NULL);
 
   lock->holder = NULL;
+  lock->priority = PRI_MIN;
   sema_init(&lock->semaphore, 1);
 }
-void lock_prio_donate(struct lock* lock,struct thread* t){
+
+static void lock_prio_donate(struct lock* lock,struct thread* t){
     if(lock == NULL || lock->holder == NULL){
         return;
     }
-    if(lock->holder->priority < t->priority){
-      lock->holder->priority = t->priority;
-      lock_prio_donate(lock->holder->waiting_lock,lock->holder);
+    /* 锁的优先级比等待者低，那要更新锁 */
+    if(lock->priority < t->priority){
+        lock->priority = t->priority;
+
+        /* 锁的优先级比持有者高，更新线程优先级 */
+        if(lock->holder->priority < lock->priority){
+          lock->holder->priority = lock->priority;
+        }
+        if(lock->holder->waiting_lock != NULL)
+            lock_prio_donate(lock->holder->waiting_lock,lock->holder);
     }
 }
+
 /* 获取锁，必要时会休眠直至锁可用。当前线程不得持有该锁。
   此函数可能会休眠，因此不得在中断处理程序中调用。
   可以在禁用中断的情况下调用此函数，
@@ -204,8 +216,12 @@ void lock_acquire(struct lock* lock) {
   cur->waiting_lock = lock;
   /* 进入睡眠等待 */
   sema_down(&lock->semaphore);
+  /* 醒来之后 */
+  struct thread* new = thread_current();
+  new->waiting_lock = NULL;
+  lock->holder = new;
+  list_push_back(&new->holding_lock,&lock->elem);
 
-  lock->holder = thread_current();
   intr_set_level(old_level);
 }
 
@@ -226,6 +242,19 @@ bool lock_try_acquire(struct lock* lock) {
   return success;
 }
 
+/* 应该遍历list，不然lock_release的话lock的优先级被改变了，还是无序 */
+int find_max_priority(struct list* list){
+    int max = thread_current()->origin_priority;
+
+    for(struct list_elem* e = list_begin(list); e != list_end(list); e = list_next(e)){
+        struct lock* lock = list_entry(e,struct lock,elem);
+        if(lock->priority > max){
+            max = lock->priority;
+        }
+    }
+    return max;
+}
+
 /* 释放锁，该锁必须由当前线程持有。
   中断处理程序无法获取锁，因此在中断处理程序中尝试释放锁是没有意义的。 */
 void lock_release(struct lock* lock) {
@@ -233,12 +262,16 @@ void lock_release(struct lock* lock) {
   ASSERT(lock_held_by_current_thread(lock));
 
   enum intr_level old_level = intr_disable();
-  /* 恢复当前线程的prio */
+
+  /* 恢复当前线程的prio,要从lock的waiter中找到优先级最高的，赋值给holder */
   struct thread* cur = thread_current();
-  cur->priority = cur->origin_priority;
-  cur->waiting_lock = NULL;
   lock->holder = NULL;
+  list_remove(&lock->elem);
+  /* 这里不能用set_priority,否则会立即yield，应该在sema_up的时候yield */
+  cur->priority = find_max_priority(&cur->holding_lock);
+
   sema_up(&lock->semaphore);
+
   intr_set_level(old_level);
 }
 
