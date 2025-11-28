@@ -49,7 +49,7 @@ void sema_init(struct semaphore* sema, unsigned value) {
 }
 
 /* 大的排在前面 */
-static bool priority_compare(const struct list_elem* a, const struct list_elem* b, void* aux UNUSED){
+static bool thread_priority_compare(const struct list_elem* a, const struct list_elem* b, void* aux UNUSED){
    struct thread* cur_a = list_entry(a,struct thread,elem);
    struct thread* cur_b = list_entry(b,struct thread,elem);
    return cur_a->priority > cur_b->priority;
@@ -69,8 +69,8 @@ void sema_down(struct semaphore* sema) {
 
   old_level = intr_disable();
   while (sema->value == 0) {
-    /* 按大在前插入 */
-    list_insert_ordered(&sema->waiters,&thread_current()->elem,priority_compare,NULL);
+    /* 用这个保证了同优先级情况下fifo顺序。因为取的时候遍历列表，是大于max_prio才更新 */
+    list_push_back(&sema->waiters,&thread_current()->elem);
     thread_block();
   }
   sema->value--;
@@ -99,6 +99,23 @@ bool sema_try_down(struct semaphore* sema) {
   return success;
 }
 
+static struct thread* get_max_priority(struct list* list){
+    int max_prio = PRI_MIN;
+    struct thread* max_t = NULL;
+    struct list_elem* max_elem = NULL;
+
+    for(struct list_elem *e = list_begin(list); e != list_end(list); e = list_next(e)){
+        struct thread* t = list_entry(e,struct thread, elem);
+        if(t->priority > max_prio){
+            max_t = t;
+            max_elem = e;
+            max_prio = t->priority;
+        }
+    }
+    list_remove(max_elem);
+    return max_t;
+}
+
 /* Up or "V" operation on a semaphore.  Increments SEMA's value
    and wakes up one thread of those waiting for SEMA, if any.
 
@@ -112,7 +129,9 @@ void sema_up(struct semaphore* sema) {
   old_level = intr_disable();
 
   if (!list_empty(&sema->waiters)){
-    t = list_entry(list_pop_front(&sema->waiters), struct thread, elem);
+    /* 要找最大优先级的唤醒 */
+    // t = list_entry(list_pop_front(&sema->waiters), struct thread, elem);
+    t = get_max_priority(&sema->waiters);
     /* 把waiter的首个线程就绪 */
     thread_unblock(t);
   }

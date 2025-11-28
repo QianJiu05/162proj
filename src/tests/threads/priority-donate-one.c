@@ -42,9 +42,10 @@ void test_priority_donate_one(void) {
   thread_create("acquire2", PRI_DEFAULT + 2, acquire2_thread_func, &lock);
   msg("This thread should have priority %d.  Actual priority: %d.", PRI_DEFAULT + 2,
       thread_get_priority());
+      //main在这里才release，然后调度，应该是th2获得这个锁
   lock_release(&lock);
 
-  //   msg("create th2,lock held by:%s",thread_current()->name);//ADD
+    // msg("create th2,lock held by:%s",thread_current()->name);//ADD
   // msg("thread priority: %d", thread_get_priority());//ADD
 
   msg("acquire2, acquire1 must already have finished, in that order.");

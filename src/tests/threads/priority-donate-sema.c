@@ -36,9 +36,13 @@ void test_priority_donate_sema(void) {
 
   lock_init(&ls.lock);
   sema_init(&ls.sema, 0);
+  //low 获取lock;但获取sema失败
   thread_create("low", PRI_DEFAULT + 1, l_thread_func, &ls);
+  //med 获取sema失败，没有提升main
   thread_create("med", PRI_DEFAULT + 3, m_thread_func, &ls);
+  //high获取lock失败，会把low提升到high的优先级，这时候会先运行low
   thread_create("high", PRI_DEFAULT + 5, h_thread_func, &ls);
+  //main的优先级最低，所以sema_down的都不会成功，一旦释放，会先唤醒目前优先级最高的low
   sema_up(&ls.sema);
   msg("Main thread finished.");
 }
