@@ -30,6 +30,7 @@ bool lock_try_acquire(struct lock*);
 void lock_release(struct lock*);
 bool lock_held_by_current_thread(const struct lock*);
 
+int find_max_priority(struct list* list);
 /* Condition variable. */
 struct condition {
   struct list waiters; /* List of waiting threads. */

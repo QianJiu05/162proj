@@ -24,10 +24,12 @@ void test_priority_donate_lower(void) {
   lock_init(&lock);
   lock_acquire(&lock);
   thread_create("acquire", PRI_DEFAULT + 10, acquire_thread_func, &lock);
+  //main应该要被acq线程提升prio到41
   msg("Main thread should have priority %d.  Actual priority: %d.", PRI_DEFAULT + 10,
       thread_get_priority());
 
   msg("Lowering base priority...");
+  //这里把main的origin设置成了21，但是由于还有41的在等待，当前还应该是41
   thread_set_priority(PRI_DEFAULT - 10);
   msg("Main thread should have priority %d.  Actual priority: %d.", PRI_DEFAULT + 10,
       thread_get_priority());

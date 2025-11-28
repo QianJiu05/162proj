@@ -100,7 +100,7 @@ bool sema_try_down(struct semaphore* sema) {
 }
 
 static struct thread* get_max_priority(struct list* list){
-    int max_prio = PRI_MIN;
+    int max_prio = -1;
     struct thread* max_t = NULL;
     struct list_elem* max_elem = NULL;
 
@@ -112,7 +112,8 @@ static struct thread* get_max_priority(struct list* list){
             max_prio = t->priority;
         }
     }
-    list_remove(max_elem);
+    if(max_elem != NULL)
+        list_remove(max_elem);
     return max_t;
 }
 
@@ -212,6 +213,7 @@ static void lock_prio_donate(struct lock* lock,struct thread* t){
         if(lock->holder->priority < lock->priority){
           lock->holder->priority = lock->priority;
         }
+        /* lock的持有者还在等待其他锁，递归donate */
         if(lock->holder->waiting_lock != NULL)
             lock_prio_donate(lock->holder->waiting_lock,lock->holder);
     }
@@ -229,7 +231,8 @@ void lock_acquire(struct lock* lock) {
   struct thread* cur = thread_current();
   /* 关中断 */
   enum intr_level old_level = intr_disable();
-  if(lock->holder != NULL && lock->holder->priority < cur->priority){
+  if(lock->holder != NULL && lock->priority < cur->priority){
+  // if(lock->holder != NULL && lock->holder->priority < cur->priority){
       lock_prio_donate(lock,cur);
   }
   cur->waiting_lock = lock;
@@ -286,7 +289,8 @@ void lock_release(struct lock* lock) {
   struct thread* cur = thread_current();
   lock->holder = NULL;
   list_remove(&lock->elem);
-  /* 这里不能用set_priority,否则会立即yield，应该在sema_up的时候yield */
+  /* 这里不能用set_priority,否则会立即yield，应该在sema_up的时候yield
+    线程如果还持有锁，从持有锁中找，如果没有，find_max会返回origin_prio */
   cur->priority = find_max_priority(&cur->holding_lock);
 
   sema_up(&lock->semaphore);

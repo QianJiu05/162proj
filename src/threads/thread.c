@@ -336,8 +336,10 @@ void thread_foreach(thread_action_func* func, void* aux) {
   如果优先级变低而就绪列表有更高优先级，要直接调度 */
 void thread_set_priority(int new_priority) { 
     struct thread* cur = thread_current();
+    cur->origin_priority = new_priority;
+
     int old_priority = cur->priority;
-    cur->priority = new_priority; 
+    cur->priority = find_max_priority(&cur->holding_lock); 
     /* 只有当优先级降低了，才可能被抢占，提高不会(否则不会运行当前线程) */
     if(active_sched_policy == SCHED_PRIO && old_priority > new_priority){
         thread_yield();
