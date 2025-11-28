@@ -199,7 +199,6 @@ void lock_acquire(struct lock* lock) {
   /* 关中断 */
   enum intr_level old_level = intr_disable();
   if(lock->holder != NULL && lock->holder->priority < cur->priority){
-      // lock->holder->priority = cur->priority;
       lock_prio_donate(lock,cur);
   }
   cur->waiting_lock = lock;

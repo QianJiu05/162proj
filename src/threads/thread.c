@@ -240,15 +240,6 @@ static void thread_enqueue(struct thread* t) {
       list_push_back(&fifo_ready_list, &t->elem);
   }else if(active_sched_policy == SCHED_PRIO){
       list_insert_ordered(&prio_ready_list,&t->elem,priority_compare,NULL);
-      // printf("==============execute insert==============\n");
-      // struct thread* cur = NULL;
-      // struct list_elem* e = NULL;
-      // for(e = list_begin(&prio_ready_list);e != list_end(&prio_ready_list);
-      //         e = list_next(e))
-      // {
-      //     cur = list_entry(e,struct thread,elem);
-      //     printf("tid = %d,prio = %d\n",cur->tid,cur->priority);
-      // }
   }else{
       PANIC("Unimplemented scheduling policy value: %d", active_sched_policy);
   }
@@ -337,8 +328,17 @@ void thread_foreach(thread_action_func* func, void* aux) {
   }
 }
 
-/* Sets the current thread's priority to NEW_PRIORITY. */
-void thread_set_priority(int new_priority) { thread_current()->priority = new_priority; }
+/* Sets the current thread's priority to NEW_PRIORITY.
+  如果优先级变低而就绪列表有更高优先级，要直接调度 */
+void thread_set_priority(int new_priority) { 
+    struct thread* cur = thread_current();
+    int old_priority = cur->priority;
+    cur->priority = new_priority; 
+    /* 只有当优先级降低了，才可能被抢占，提高不会(否则不会运行当前线程) */
+    if(old_priority > new_priority){
+        thread_yield();
+    }
+}
 
 /* Returns the current thread's priority. */
 int thread_get_priority(void) { return thread_current()->priority; }
