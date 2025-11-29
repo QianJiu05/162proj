@@ -131,7 +131,6 @@ void sema_up(struct semaphore* sema) {
 
   if (!list_empty(&sema->waiters)){
     /* 要找最大优先级的唤醒 */
-    // t = list_entry(list_pop_front(&sema->waiters), struct thread, elem);
     t = get_max_priority(&sema->waiters);
     /* 把waiter的首个线程就绪 */
     thread_unblock(t);
@@ -264,7 +263,7 @@ bool lock_try_acquire(struct lock* lock) {
   return success;
 }
 
-/* 应该遍历list，不然lock_release的话lock的优先级被改变了，还是无序 */
+/* 应该遍历持有锁的list，不然lock_release的话lock的优先级被改变了，还是无序 */
 int find_max_priority(struct list* list){
     int max = thread_current()->origin_priority;
 
@@ -288,6 +287,8 @@ void lock_release(struct lock* lock) {
   /* 恢复当前线程的prio,要从lock的waiter中找到优先级最高的，赋值给holder */
   struct thread* cur = thread_current();
   lock->holder = NULL;
+  /* lock的prio也要更新 */
+  lock->priority = PRI_MIN;
   list_remove(&lock->elem);
   /* 这里不能用set_priority,否则会立即yield，应该在sema_up的时候yield
     线程如果还持有锁，从持有锁中找，如果没有，find_max会返回origin_prio */
@@ -366,8 +367,9 @@ void rw_lock_release(struct rw_lock* rw_lock, bool reader) {
 
 /* One semaphore in a list. */
 struct semaphore_elem {
-  struct list_elem elem;      /* List element. */
+  struct list_elem elem;      /* List element.把自己挂到cond等待列表 */
   struct semaphore semaphore; /* This semaphore. */
+  int priority;               /* 优先唤醒高优先级的sema */
 };
 
 /* Initializes condition variable COND.  A condition variable
@@ -379,27 +381,17 @@ void cond_init(struct condition* cond) {
   list_init(&cond->waiters);
 }
 
-/* Atomically releases LOCK and waits for COND to be signaled by
-   some other piece of code.  After COND is signaled, LOCK is
-   reacquired before returning.  LOCK must be held before calling
-   this function.
-
-   The monitor implemented by this function is "Mesa" style, not
-   "Hoare" style, that is, sending and receiving a signal are not
-   an atomic operation.  Thus, typically the caller must recheck
-   the condition after the wait completes and, if necessary, wait
-   again.
-
-   A given condition variable is associated with only a single
-   lock, but one lock may be associated with any number of
-   condition variables.  That is, there is a one-to-many mapping
-   from locks to condition variables.
-
-   This function may sleep, so it must not be called within an
-   interrupt handler.  This function may be called with
-   interrupts disabled, but interrupts will be turned back on if
-   we need to sleep. */
+/* 原子地释放 LOCK 并等待其他代码发出 COND 信号。
+  收到 COND 信号后，在返回之前重新获取 LOCK。
+  必须持有 LOCK 才能调用此函数。
+  此函数实现的监视器是“Mesa”风格的，而非“Hoare”风格的，也就是说，发送和接收信号并非原子操作。
+  因此，通常情况下，调用者必须在等待完成后重新检查条件，并在必要时再次等待。
+  一个给定的条件变量仅与一个锁关联，但一个锁可以与任意数量的条件变量关联。
+  也就是说，锁与条件变量之间存在一对多的映射关系。
+  此函数可能会进入睡眠状态，因此不得在中断处理程序中调用。
+  可以在禁用中断的情况下调用此函数，但如果需要进入睡眠状态，中断将被重新启用。 */
 void cond_wait(struct condition* cond, struct lock* lock) {
+  /* 在栈上创建一个用于睡眠的信号量 */
   struct semaphore_elem waiter;
 
   ASSERT(cond != NULL);
@@ -408,9 +400,16 @@ void cond_wait(struct condition* cond, struct lock* lock) {
   ASSERT(lock_held_by_current_thread(lock));
 
   sema_init(&waiter.semaphore, 0);
+  /* waiter应该只有一个？单纯用于睡眠
+    CondV没有优先级捐赠 */
+  waiter.priority = thread_current()->priority;
+  /* 把信号量挂到cond的等待队列里 */
   list_push_back(&cond->waiters, &waiter.elem);
+  /* 释放锁，让其他线程可以修改条件 */
   lock_release(lock);
+  /* 睡眠直到其他线程sema_up，这里共享状态已经被改成true了 */
   sema_down(&waiter.semaphore);
+  /* 重新获得锁，然后返回 */
   lock_acquire(lock);
 }
 
@@ -427,8 +426,26 @@ void cond_signal(struct condition* cond, struct lock* lock UNUSED) {
   ASSERT(!intr_context());
   ASSERT(lock_held_by_current_thread(lock));
 
-  if (!list_empty(&cond->waiters))
-    sema_up(&list_entry(list_pop_front(&cond->waiters), struct semaphore_elem, elem)->semaphore);
+  if (!list_empty(&cond->waiters)){
+    struct semaphore_elem* max_se = NULL;
+    int priority = -1;
+
+    /* 应该优先唤醒prio最高的 */
+    for(struct list_elem* e = list_begin(&cond->waiters); e != list_end(&cond->waiters); e = list_next(e)){
+        struct semaphore_elem* se =  list_entry(e, struct semaphore_elem, elem);
+        if(se->priority > priority){
+            priority = se->priority;
+            max_se = se;
+        }
+    }
+
+    if (max_se != NULL) {
+        list_remove(&max_se->elem);
+        sema_up(&max_se->semaphore);
+    }
+
+    // sema_up(&list_entry(list_pop_front(&cond->waiters), struct semaphore_elem, elem)->semaphore);
+  }
 }
 
 /* Wakes up all threads, if any, waiting on COND (protected by
