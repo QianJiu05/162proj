@@ -210,6 +210,16 @@ static pid_t syscall_fork(struct intr_frame* f){
     pid = process_fork();
     return pid;
 }
+static tid_t syscall_pt_create(stub_fun sfun, pthread_fun tfun, const void* arg){
+    return pthread_execute(sfun,tfun,arg);
+}
+static void syscall_pt_exit(void){
+    // printf("pt exit\n");
+    pthread_exit();
+}
+static tid_t syscall_pt_join(tid_t tid){
+    return pthread_join(tid);
+}
 //arg[0]是调用号，其余是参数
 static void syscall_handler(struct intr_frame* f UNUSED) {
     //调用者的堆栈指针可以通过传递给它的 struct intr_frame 的 esp 成员访问。指针数组
@@ -301,6 +311,18 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
 
         case SYS_FORK:
             f->eax = syscall_fork(f);
+            break;
+
+        case SYS_PT_CREATE:
+            f->eax = syscall_pt_create((stub_fun)args[1],(pthread_fun)args[2],(void*)args[3]);
+            break;
+        
+        case SYS_PT_EXIT:
+            syscall_pt_exit();
+            break;
+
+        case SYS_PT_JOIN:
+            syscall_pt_join(args[1]);
             break;
 
     }

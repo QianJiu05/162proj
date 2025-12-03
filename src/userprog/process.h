@@ -53,6 +53,8 @@ struct process {
 
    struct file* elf;          /* 可执行文件的指针，用于退出时关闭 */
    struct intr_frame saved_if;
+
+   struct list multi_thread;  /* 用于挂载多线程 */
 };
 
 struct pass_args{

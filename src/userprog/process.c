@@ -184,6 +184,7 @@ static void start_process(void* file_name) {
       strlcpy(t->pcb->process_name, t->name, sizeof t->name);
 
       list_init(&(t->pcb->child_list));
+      list_init(&t->pcb->multi_thread);
       memset(&t->pcb->fdt,0,sizeof(t->pcb->fdt));
 
       t->pcb->in_parent = NULL;
@@ -913,43 +914,172 @@ bool is_main_thread(struct thread* t, struct process* p) { return p->main_thread
 /* Gets the PID of a process */
 pid_t get_pid(struct process* p) { return (pid_t)p->main_thread->tid; }
 
-/* Creates a new stack for the thread and sets up its arguments.
-   Stores the thread's entry point into *EIP and its initial stack
-   pointer into *ESP. Handles all cleanup if unsuccessful. Returns
-   true if successful, false otherwise.
+uint8_t* find_stack_addr(void){
+    uint8_t* addr = (uint8_t*)PHYS_BASE - PGSIZE;
+    struct process* p = thread_current()->pcb;
+    struct thread* t = NULL;
 
-   This function will be implemented in Project 2: Multithreading. For
-   now, it does nothing. You may find it necessary to change the
-   function signature. */
-bool setup_thread(void (**eip)(void) UNUSED, void** esp UNUSED) { return false; }
+    while(addr > (uint8_t*)0x08048000){
+        bool occupied = false;
+        /* 遍历当前threads，查看地址是否已经被占用 */
+        for(struct list_elem* e = list_begin(&p->multi_thread); e != list_end(&p->multi_thread);
+                e = list_next(e))
+        {
+            t = list_entry(e,struct thread,pcb_elem);
+            if(t->user_stack == addr){
+                occupied = true;
+                break;
+            }
+        }
+        if(occupied == false && pagedir_get_page(p->pagedir,addr) == NULL){
+                return addr;
+        }
+        addr -= PGSIZE;
+    }
+    printf("can't find valuable addr\n");
+    return NULL;
+}
+/* 为线程创建一个新栈并设置其参数。将线程的入口点存储到 *EIP，并将初始栈指针存储到 *ESP。
+  如果操作失败，则处理所有清理工作。成功返回 true，否则返回 false。 */
+bool setup_thread(void (**eip)(void) , void** esp ) {
+    uint8_t* kpage;
+    uint8_t* stack_addr;
+    bool success = false;
 
-/* Starts a new thread with a new user stack running SF, which takes
-   TF and ARG as arguments on its user stack. This new thread may be
-   scheduled (and may even exit) before pthread_execute () returns.
-   Returns the new thread's TID or TID_ERROR if the thread cannot
-   be created properly.
+    /* 申请一块地址，把这个地址install到合适的位置 */
+    kpage = palloc_get_page(PAL_USER | PAL_ZERO);
+    if (kpage != NULL) {
+        stack_addr = find_stack_addr();
+        success = install_page(((uint8_t*)stack_addr), kpage, true);
+        if (success){
+          thread_current()->user_stack = stack_addr;
+          *esp = stack_addr + PGSIZE;//栈顶
+        }
+        else
+          palloc_free_page(kpage);
+    }
+    return success;
+}
 
-   This function will be implemented in Project 2: Multithreading and
-   should be similar to process_execute (). For now, it does nothing.
-   */
-tid_t pthread_execute(stub_fun sf UNUSED, pthread_fun tf UNUSED, void* arg UNUSED) { return -1; }
+struct exec_arg{
+    stub_fun sf ;
+    pthread_fun tf ; 
+    void* arg;
+    bool success;
+    struct semaphore sema;
+    struct process* p;
+};
+/* 启动一个新线程，该线程使用新的用户栈运行 SF，
+  并接受TF 和 ARG 作为用户栈上的参数。
+  这个新线程可能在 pthread_execute() 返回之前被调度（甚至可能退出）。
+  返回新线程的 TID，如果线程无法正确创建，则返回 TID_ERROR。
+  并且应该类似于 process_execute()。
+*/
+tid_t pthread_execute(stub_fun sf , pthread_fun tf , void* arg ) {
+    struct exec_arg* thread_arg = calloc(sizeof(struct exec_arg),1);
+    if(thread_arg == NULL){
+        return TID_ERROR;
+    }
+    thread_arg->sf = sf;
+    thread_arg->tf = tf;
+    thread_arg->arg = arg;
+    sema_init(&thread_arg->sema,0);
+    thread_arg->p = thread_current()->pcb;
 
-/* A thread function that creates a new user thread and starts it
-   running. Responsible for adding itself to the list of threads in
-   the PCB.
+    /* 由于thread_create添加了优先级调度，如果子线程优先级高于父线程，
+      会直接让出CPU;或子线程与父线程优先级相同，父线程时间片耗尽，
+      导致还没运行到sema_down，子线程就sema_up了，
+      所以要先修改父线程优先级，保证先进入睡眠 */
+    int priority = thread_get_priority();
+    thread_set_priority(PRI_DEFAULT + 1);
+    tid_t tid = thread_create("pthread", PRI_DEFAULT, start_pthread, thread_arg);
+    if(tid == TID_ERROR){
+        free(thread_arg);
+        return TID_ERROR;
+    }
+    sema_down(&thread_arg->sema);
+    thread_set_priority(priority);
 
-   This function will be implemented in Project 2: Multithreading and
-   should be similar to start_process (). For now, it does nothing. */
-static void start_pthread(void* exec_ UNUSED) {}
+    free(thread_arg);
+    return tid;
+}
 
-/* Waits for thread with TID to die, if that thread was spawned
-   in the same process and has not been waited on yet. Returns TID on
-   success and returns TID_ERROR on failure immediately, without
-   waiting.
+/* 一个用于创建新用户线程并启动它的线程函数。它负责将自身添加到PCB的线程列表中。
+此函数类似于`start_process()`。
+  start_process主要进行参数填充，pcb建立以及初始化， */
+static void start_pthread(void* exec_ ) {
+    bool success = false;
+    struct exec_arg* exec = (struct exec_arg*)exec_;
+    struct intr_frame if_;
+    struct thread *t = thread_current();
+    
+    t->pcb = exec->p;
 
-   This function will be implemented in Project 2: Multithreading. For
-   now, it does nothing. */
-tid_t pthread_join(tid_t tid UNUSED) { return -1; }
+    /* 激活页表 (共享进程的页表) ,如果不激活，MMU无法转换地址 */
+    process_activate();
+
+    list_push_back(&t->pcb->multi_thread,&t->pcb_elem);//t->pcb = null
+    memset(&if_, 0, sizeof if_);
+    if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
+    if_.cs = SEL_UCSEG;
+    if_.eflags = FLAG_IF | FLAG_MBS;
+
+    /* 把esp指向栈顶 */
+    success = setup_thread(&if_.eip,&if_.esp);
+    if(success){
+      /* 压栈，
+          [arg]
+          [tf]
+          [Ret Addr] <-esp 指向这里
+           并且 eip 指向 sf */
+        char* esp = (char*)if_.esp;
+        esp -= 4; *(void**)esp = exec->arg;
+        esp -= 4; *(void**)esp = exec->tf;
+        esp -= 4; *(void**)esp = 0;
+
+        if_.esp = (void*)esp;
+        if_.eip = exec->sf;
+    }else{
+        sema_up(&exec->sema);
+        thread_exit();
+    }
+
+    sema_init(&t->join_sema,0);
+    t->been_joined = false;
+
+    /* 唤醒父线程 */
+    exec->success = success;
+    // for(;;);
+
+    sema_up(&exec->sema);
+    //die
+
+    asm volatile("movl %0, %%esp; jmp intr_exit" : : "g"(&if_) : "memory");
+    NOT_REACHED();
+}
+
+/* 等待 TID 为 TID 的线程终止，前提是该线程是在同一进程中创建的，
+  并且尚未被等待过。成功时返回 TID，失败时立即返回 TID_ERROR，
+  不等待。 */
+tid_t pthread_join(tid_t tid ) { 
+    struct process * p = thread_current()->pcb;
+
+    for(struct list_elem* e = list_begin(&p->multi_thread);
+            e != list_end(&p->multi_thread); e = list_next(e))
+    {
+        struct thread* t = list_entry(e,struct thread, pcb_elem);
+        if(tid == t->tid){
+            if(t->been_joined == true){
+                return TID_ERROR;
+            }
+            t->been_joined = true;
+            sema_down(&t->join_sema);
+            return tid;
+        }
+    }
+    return TID_ERROR;
+}
+
 
 /* Free the current thread's resources. Most resources will
    be freed on thread_exit(), so all we have to do is deallocate the
@@ -960,7 +1090,19 @@ tid_t pthread_join(tid_t tid UNUSED) { return -1; }
 
    This function will be implemented in Project 2: Multithreading. For
    now, it does nothing. */
-void pthread_exit(void) {}
+void pthread_exit(void) {
+    struct thread* t = thread_current();
+    // if(t == t->pcb->main_thread){
+    //     pthread_exit_main();
+    // }else{
+        sema_up(&t->join_sema);
+        void* kpage = pagedir_get_page(t->pcb->pagedir,t->user_stack);
+        palloc_free_page(kpage);
+        pagedir_clear_page(t->pcb->pagedir,t->user_stack);
+        list_remove(&t->pcb_elem);
+        thread_exit();
+    // }
+}
 
 /* Only to be used when the main thread explicitly calls pthread_exit.
    The main thread should wait on all threads in the process to
@@ -970,4 +1112,6 @@ void pthread_exit(void) {}
 
    This function will be implemented in Project 2: Multithreading. For
    now, it does nothing. */
-void pthread_exit_main(void) {}
+void pthread_exit_main(void) {
+
+}

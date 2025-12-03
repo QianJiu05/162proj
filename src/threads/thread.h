@@ -93,6 +93,11 @@ struct thread {
   /* Owned by process.c. */
   struct process* pcb; /* Process control block if this thread is a userprog */
   struct thread* parent; /* 通过父线程找到父进程 */
+  /* 用户线程才有pcb与多线程 */
+  uint8_t* user_stack;
+  struct list_elem pcb_elem; /* 挂载到pcb的多线程列表 */
+  bool been_joined;     /* 被thread_join */
+  struct semaphore join_sema;
 #endif
 
   /* Owned by thread.c. */
