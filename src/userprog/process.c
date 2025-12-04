@@ -30,7 +30,7 @@ bool setup_thread(void (**eip)(void), void** esp);
 
 struct lock file_lock;
 static bool copy_memory(uint32_t* parent,uint32_t* child);
-static void start_fork_process(void);
+static void start_fork_process(struct child_process *chpcb);
 
 /* 通过确保主线程拥有最小的程序控制块 (PCB) 来初始化系统中的用户程序，
    以便它能够执行并等待第一个用户进程。如果主线程需要这些成员，
@@ -377,22 +377,25 @@ pid_t process_fork(void){
     // printf("[FORK] Parent '%s' (tid=%d) creating child via fork\n", 
     //        t->pcb->process_name, t->tid);
 
-    tid_t tid = thread_create(t->pcb->process_name,PRI_DEFAULT,start_fork_process,NULL);
-    if(tid == TID_ERROR){
-        return TID_ERROR;
-    }
-
     struct child_process *child = malloc(sizeof(struct child_process));
     if(child == NULL){
         return TID_ERROR;
     }
-    child->pid = tid;
     child->wait_by_parent = false;
     child->alive = false;
     child->create_success = false;
     child->exit_status = -1;
     sema_init(&(child->sema),0);
     list_push_back(&(t->pcb->child_list),&(child->elem));
+
+    tid_t tid = thread_create(t->pcb->process_name,PRI_DEFAULT,start_fork_process,child);
+    if(tid == TID_ERROR){
+        return TID_ERROR;
+    }
+
+
+    child->pid = tid;
+
 
     /* 让父进程进入等待，创建子进程后唤醒父进程，
         不论是否成功，然后初始化child_PCB并返回tid */
@@ -407,7 +410,7 @@ pid_t process_fork(void){
     }
     return tid;
 }
-static void start_fork_process(void){
+static void start_fork_process(struct child_process *chpcb){
     // printf("[START]enter\n");
     struct thread* t = thread_current();
     bool success = false, pcb_success = false;
@@ -451,23 +454,26 @@ static void start_fork_process(void){
         }
     }
     /* 建立与父进程的连接 */
-    t->pcb->in_parent = NULL;
-    struct thread* parent_thread = t->parent;
-    if(parent_thread != NULL && parent_thread->pcb != NULL){
-        for(struct list_elem *e = list_begin(&(parent_thread->pcb->child_list));
-                e != list_end(&(parent_thread->pcb->child_list));
-                e = list_next(e))
-        {
-            struct child_process* ch_pcb = list_entry(e,struct child_process,elem);
-            if(ch_pcb->pid == t->tid){
-                t->pcb->in_parent = ch_pcb;
-                /* 标记为alive，如果创建失败改成false */
-                ch_pcb->alive = true;
-                ch_pcb->create_success = true;
-                break;
-            }
-        }
-    }
+    // t->pcb->in_parent = NULL;
+    t->pcb->in_parent = chpcb;
+    chpcb->alive = true;
+    chpcb->create_success = true;
+    // struct thread* parent_thread = t->parent;
+    // if(parent_thread != NULL && parent_thread->pcb != NULL){
+    //     for(struct list_elem *e = list_begin(&(parent_thread->pcb->child_list));
+    //             e != list_end(&(parent_thread->pcb->child_list));
+    //             e = list_next(e))
+    //     {
+    //         struct child_process* ch_pcb = list_entry(e,struct child_process,elem);
+    //         if(ch_pcb->pid == t->tid){
+    //             t->pcb->in_parent = ch_pcb;
+    //             /* 标记为alive，如果创建失败改成false */
+    //             ch_pcb->alive = true;
+    //             ch_pcb->create_success = true;
+    //             break;
+    //         }
+    //     }
+    // }
     // printf("[START]copy mem\n");
     success = copy_memory(t->parent->pcb->pagedir,t->pcb->pagedir);
     if(success == false){
