@@ -144,13 +144,10 @@ pid_t process_execute(const char* file_name) {
         return TID_ERROR;
     }
 
-
-    
     if(child == NULL){
         return TID_ERROR;
     }
     child->pid = tid;
-
 
     /* 让父进程进入等待，创建子进程后唤醒父进程，
         不论是否成功，然后初始化child_PCB并返回tid */
@@ -198,6 +195,8 @@ static void start_process(void* _arg) {
       list_init(&(t->pcb->child_list));
       list_init(&t->pcb->multi_thread);
       memset(&t->pcb->fdt,0,sizeof(t->pcb->fdt));
+      memset(t->pcb->userlock,0,MAX_LOCK_NUM);
+      memset(t->pcb->usersema,0,MAX_LOCK_NUM);
 
       if(proc_arg->child != NULL){
           t->pcb->in_parent = proc_arg->child;
@@ -973,7 +972,7 @@ struct exec_arg{
     stub_fun sf ;
     pthread_fun tf ; 
     void* arg;
-    bool success;
+    bool success;//暂未使用到
     struct semaphore sema;
     struct process* p;
 };
@@ -1057,10 +1056,7 @@ static void start_pthread(void* exec_ ) {
 
     /* 唤醒父线程 */
     exec->success = success;
-    // for(;;);
-
     sema_up(&exec->sema);
-    //die
 
     asm volatile("movl %0, %%esp; jmp intr_exit" : : "g"(&if_) : "memory");
     NOT_REACHED();
@@ -1119,4 +1115,92 @@ void pthread_exit(void) {
    now, it does nothing. */
 void pthread_exit_main(void) {
 
+}
+
+bool user_lock_init(lock_t* lock) {
+    if(lock == NULL)return false;
+
+    struct process *p = thread_current()->pcb;
+
+    for(int idx = 0; idx < MAX_LOCK_NUM; idx++){
+        if(p->userlock[idx] == NULL){
+            struct lock* new = malloc(sizeof(struct lock));
+            if(new == NULL)return false;
+            lock_init(new);
+
+            p->userlock[idx] = new;
+            *lock = (lock_t)idx;
+            return true;
+        }
+    }
+    return false;
+}
+
+bool user_lock_aquire(lock_t* lock) { 
+    if(lock == NULL || *lock >= MAX_LOCK_NUM || *lock <= 0)return false;
+
+    struct thread *t = thread_current();
+    struct process *p = t->pcb;
+    if(p->userlock[*lock] == NULL || p->userlock[*lock]->holder == t){
+        return false;
+    }
+    lock_acquire(p->userlock[*lock]);
+    return true;
+}
+
+bool user_lock_release(lock_t* lock) {
+    if(lock == NULL || *lock >= MAX_LOCK_NUM || *lock <= 0)return false;
+
+    struct thread *t = thread_current();
+    struct process *p = t->pcb;
+    if(*lock >= MAX_LOCK_NUM){
+        return false;
+    }
+    if(p->userlock[*lock] == NULL || p->userlock[*lock]->holder != t){
+        return false;
+    }
+    lock_release(p->userlock[*lock]);
+    return true;
+}
+
+bool user_sema_init(sema_t* sema, int val) {
+    //这里是做赋值，不用判断
+    if(sema == NULL || val < 0){return false;}
+
+    struct process *p = thread_current()->pcb;
+    
+    for(int idx = 0; idx < MAX_LOCK_NUM; idx++){
+        if(p->usersema[idx] == NULL){
+            struct semaphore* new = malloc(sizeof(struct semaphore));
+            if(new == NULL)return false;
+            sema_init(new,val);
+
+            p->usersema[idx] = new;
+            *sema = (sema_t)idx;
+            return true;
+        }
+    }
+    return false;
+}
+bool user_sema_up(sema_t* sema) {
+    if(sema == NULL || *sema >= MAX_LOCK_NUM || *sema < 0){return false;}
+
+    struct thread *t = thread_current();
+    struct process *p = t->pcb;
+    if(p->usersema[*sema] == NULL){
+        return false;
+    }
+    sema_up(p->usersema[*sema]);
+    return true;
+}
+bool user_sema_down(sema_t* sema) {
+    if(sema == NULL || *sema >= MAX_LOCK_NUM || *sema < 0){return false;}
+
+    struct thread *t = thread_current();
+    struct process *p = t->pcb;
+    if(*sema >= MAX_LOCK_NUM || p->usersema[*sema] == NULL){
+        return false;
+    }
+    sema_down(p->usersema[*sema]);
+    return true;
 }

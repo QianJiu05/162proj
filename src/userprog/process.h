@@ -13,6 +13,7 @@
 
 #define MAX_ARGC  128
 #define MAX_NAME_LENGTH 128
+#define MAX_LOCK_NUM 128
 /* PIDs and TIDs are the same type. PID should be
    the TID of the main thread of the process */
 typedef tid_t pid_t;
@@ -55,6 +56,10 @@ struct process {
    struct intr_frame saved_if;
 
    struct list multi_thread;  /* 用于挂载多线程 */
+
+   struct lock* userlock[MAX_LOCK_NUM];
+   struct semaphore* usersema[MAX_LOCK_NUM];
+
 };
 
 struct pass_args{
@@ -77,5 +82,15 @@ tid_t pthread_execute(stub_fun, pthread_fun, void*);
 tid_t pthread_join(tid_t);
 void pthread_exit(void);
 void pthread_exit_main(void);
+
+/* Synchronization Types */
+typedef char lock_t;
+typedef char sema_t;
+bool user_lock_init(lock_t* lock);
+bool user_lock_aquire(lock_t* lock);
+bool user_lock_release(lock_t* lock);
+bool user_sema_init(sema_t* sema, int val);
+bool user_sema_up(sema_t* sema);
+bool user_sema_down(sema_t* sema);
 
 #endif /* userprog/process.h */

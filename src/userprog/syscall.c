@@ -41,6 +41,13 @@ static pid_t syscall_fork(struct intr_frame* f);
 static tid_t syscall_pt_create(stub_fun sfun, pthread_fun tfun, const void* arg);
 static void syscall_pt_exit(void);
 static tid_t syscall_pt_join(tid_t tid);
+static bool syscall_lock_init(lock_t* lock);
+static bool syscall_lock_aquire(lock_t *lock);
+static bool syscall_lock_release(lock_t *lock);
+static bool syscall_sema_init(sema_t* sema, int val);
+static bool syscall_sema_up(sema_t* sema);
+static bool syscall_sema_down(sema_t* sema);
+// static tid_t syscall_get_tid(void)
 
 
 //arg[0]是调用号，其余是参数
@@ -140,9 +147,33 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
             break;
 
         case SYS_PT_JOIN:
-            syscall_pt_join(args[1]);
+            f->eax = syscall_pt_join(args[1]);
             break;
 
+        case SYS_LOCK_INIT:
+            // check_valid_num(args[1]);
+            f->eax = syscall_lock_init(args[1]);
+            break;
+
+        case SYS_LOCK_ACQUIRE:
+            f->eax = syscall_lock_aquire(args[1]);
+            break;
+
+        case SYS_LOCK_RELEASE:
+            f->eax = syscall_lock_release(args[1]);
+            break;
+
+        case SYS_SEMA_INIT:
+            f->eax = syscall_sema_init(args[1],args[2]);
+            break;
+
+        case SYS_SEMA_DOWN:
+            f->eax = syscall_sema_down(args[1]);
+            break;
+
+        case SYS_SEMA_UP:
+            f->eax = syscall_sema_up(args[1]);
+            break;
     }
 }
 
@@ -406,9 +437,32 @@ static tid_t syscall_pt_create(stub_fun sfun, pthread_fun tfun, const void* arg)
     return pthread_execute(sfun,tfun,arg);
 }
 static void syscall_pt_exit(void){
-    // printf("pt exit\n");
     pthread_exit();
 }
 static tid_t syscall_pt_join(tid_t tid){
     return pthread_join(tid);
 }
+static bool syscall_lock_init(lock_t* lock) {
+    // bool ret = user_lock_init(lock);
+    // printf("init:%d\n",ret);
+    return user_lock_init(lock);
+    // return ret;
+}
+static bool syscall_lock_aquire(lock_t *lock){
+    return user_lock_aquire(lock);
+}
+static bool syscall_lock_release(lock_t *lock){
+    return user_lock_release(lock);
+}
+static bool syscall_sema_init(sema_t* sema, int val){
+    return user_sema_init(sema,val);
+}
+static bool syscall_sema_up(sema_t* sema){
+    return user_sema_up(sema);
+}
+static bool syscall_sema_down(sema_t* sema){
+    return user_sema_down(sema);
+}
+// static tid_t syscall_get_tid(void){
+//     return thread_tid();
+// }
