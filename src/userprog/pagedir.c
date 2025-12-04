@@ -115,10 +115,9 @@ void* pagedir_get_page(uint32_t* pd, const void* uaddr) {
     return NULL;
 }
 
-/* Marks user virtual page UPAGE "not present" in page
-   directory PD.  Later accesses to the page will fault.  Other
-   bits in the page table entry are preserved.
-   UPAGE need not be mapped. */
+/* 标记用户虚拟页 UPAGE 在页目录 PD 中“不存在”。
+之后对该页的访问将出错。页表项中的其他位将被保留。
+UPAGE 无需映射。 */
 void pagedir_clear_page(uint32_t* pd, void* upage) {
   uint32_t* pte;
 

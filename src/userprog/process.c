@@ -1086,10 +1086,7 @@ tid_t pthread_join(tid_t tid ) {
    thread's userspace stack. Wake any waiters on this thread.
 
    The main thread should not use this function. See
-   pthread_exit_main() below.
-
-   This function will be implemented in Project 2: Multithreading. For
-   now, it does nothing. */
+   pthread_exit_main() below. */
 void pthread_exit(void) {
     struct thread* t = thread_current();
     // if(t == t->pcb->main_thread){
