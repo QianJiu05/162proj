@@ -93,7 +93,10 @@ static void parse_args(const char* file_name, struct pass_args *arg){
     arg->argv[cnt] = NULL;//存入NULL表示结束
     arg->argc = cnt;
 }
-
+struct process_exec_arg{
+    char* fn_copy;
+    struct child_process* child;
+};
 /* 启动一个新线程，运行从FILENAME 加载的用户程序。
    新线程可能在 process_execute() 返回之前被调度（甚至可能退出）。
    返回新进程的进程 ID，如果无法创建线程，则返回 TID_ERROR。*/
@@ -119,29 +122,35 @@ pid_t process_execute(const char* file_name) {
     }
     file_path[fn_len] = '\0';
 
-    
-    /* Create a new thread to execute FILE_NAME. */
-    tid = thread_create(file_path, PRI_DEFAULT, start_process, fn_copy);
-
-    if (tid == TID_ERROR){
-        palloc_free_page(fn_copy);
-        return TID_ERROR;
-    }
-
     /* 此时还在父进程中 */
     struct thread* t = thread_current();
     struct child_process *child = malloc(sizeof(struct child_process));
-    
-    if(child == NULL){
-        return TID_ERROR;
-    }
-    child->pid = tid;
     child->wait_by_parent = false;
     child->alive = false;
     child->create_success = false;
     child->exit_status = -1;
     sema_init(&(child->sema),0);
     list_push_back(&(t->pcb->child_list),&(child->elem));
+
+    struct process_exec_arg* proc_arg = malloc(sizeof(struct process_exec_arg));
+    proc_arg->child = child;
+    proc_arg->fn_copy = fn_copy;
+
+    /* Create a new thread to execute FILE_NAME. */
+    // tid = thread_create(file_path, PRI_DEFAULT, start_process, fn_copy);
+    tid = thread_create(file_path, PRI_DEFAULT, start_process, proc_arg);
+    if (tid == TID_ERROR){
+        palloc_free_page(fn_copy);
+        return TID_ERROR;
+    }
+
+
+    
+    if(child == NULL){
+        return TID_ERROR;
+    }
+    child->pid = tid;
+
 
     /* 让父进程进入等待，创建子进程后唤醒父进程，
         不论是否成功，然后初始化child_PCB并返回tid */
@@ -158,11 +167,14 @@ pid_t process_execute(const char* file_name) {
 
 /* A thread function that loads a user process and starts it
    running. */
-static void start_process(void* file_name) {
+// static void start_process(void* file_name)
+static void start_process(void* _arg) {
+    struct process_exec_arg* proc_arg = (struct process_exec_arg*)_arg;
+
     struct pass_args local;
     struct pass_args* local_arg = &local;
     init_arg(local_arg);
-    parse_args(file_name,local_arg);
+    parse_args(proc_arg->fn_copy,local_arg);
     
     struct thread* t = thread_current();
     struct intr_frame if_;
@@ -187,25 +199,15 @@ static void start_process(void* file_name) {
       list_init(&t->pcb->multi_thread);
       memset(&t->pcb->fdt,0,sizeof(t->pcb->fdt));
 
-      t->pcb->in_parent = NULL;
-      
-      struct thread* parent_thread = t->parent;
-      if(parent_thread != NULL && parent_thread->pcb != NULL){
-          for(struct list_elem *e = list_begin(&(parent_thread->pcb->child_list));
-                  e != list_end(&(parent_thread->pcb->child_list));
-                  e = list_next(e))
-          {
-              struct child_process* ch_pcb = list_entry(e,struct child_process,elem);
-              if(ch_pcb->pid == t->tid){
-                  t->pcb->in_parent = ch_pcb;
-                  /* 标记为alive，如果创建失败改成false */
-                  ch_pcb->alive = true;
-                  ch_pcb->create_success = true;
-                  break;
-              }
-          }
+      if(proc_arg->child != NULL){
+          t->pcb->in_parent = proc_arg->child;
+          proc_arg->child->alive = true;
+          proc_arg->child->create_success = true;
       }
     }
+
+    struct child_process* local_in_parent = t->pcb->in_parent;
+
 
     /* Initialize interrupt frame and load executable. */
     if (success) {
@@ -216,7 +218,7 @@ static void start_process(void* file_name) {
       success = load(local_arg, &if_.eip, &if_.esp);
     }
 
-    struct child_process* local_in_parent = t->pcb->in_parent;
+    
 
     /* Handle failure with succesful PCB malloc. Must free the PCB */
     if (!success && pcb_success) {
@@ -229,7 +231,7 @@ static void start_process(void* file_name) {
     }
 
     /* Clean up. Exit on failure or jump to userspace */
-    palloc_free_page(file_name);//传进来的是fn copy as filename
+    palloc_free_page(proc_arg->fn_copy);//传进来的是fn copy as filename
 
     if (!success) {
         if(local_in_parent != NULL){
