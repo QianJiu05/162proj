@@ -144,15 +144,16 @@ pid_t process_execute(const char* file_name) {
         return TID_ERROR;
     }
 
-    if(child == NULL){
-        return TID_ERROR;
-    }
+    if(child == NULL){return TID_ERROR;}
     child->pid = tid;
 
     /* 让父进程进入等待，创建子进程后唤醒父进程，
         不论是否成功，然后初始化child_PCB并返回tid */
-    sema_down(&child->sema);
-    //这里醒了，然后判断是不是true
+        // printf("ready to semadown\n");
+        sema_down(&child->sema);
+        // printf("wakeup\n");
+    free(proc_arg);
+
     // printf("[EXEC]wake up from child exec,i'm:%s,child = %d\n",t->pcb->process_name,child->pid);
     if(child->create_success == false){
         list_remove(&child->elem);
@@ -164,7 +165,6 @@ pid_t process_execute(const char* file_name) {
 
 /* A thread function that loads a user process and starts it
    running. */
-// static void start_process(void* file_name)
 static void start_process(void* _arg) {
     struct process_exec_arg* proc_arg = (struct process_exec_arg*)_arg;
 
@@ -178,6 +178,7 @@ static void start_process(void* _arg) {
     bool success, pcb_success;
 
     /* Allocate process control block */
+    //如果用calloc直接清零就不用在后面memset了
     struct process* new_pcb = malloc(sizeof(struct process));
     success = pcb_success = new_pcb != NULL;
 
@@ -195,8 +196,8 @@ static void start_process(void* _arg) {
       list_init(&(t->pcb->child_list));
       list_init(&t->pcb->multi_thread);
       memset(&t->pcb->fdt,0,sizeof(t->pcb->fdt));
-      memset(t->pcb->userlock,0,MAX_LOCK_NUM);
-      memset(t->pcb->usersema,0,MAX_LOCK_NUM);
+      memset(t->pcb->userlock,0,sizeof(lock_t*)*MAX_LOCK_NUM);
+      memset(t->pcb->usersema,0,sizeof(lock_t*)*MAX_LOCK_NUM);
 
       if(proc_arg->child != NULL){
           t->pcb->in_parent = proc_arg->child;
@@ -207,7 +208,6 @@ static void start_process(void* _arg) {
 
     struct child_process* local_in_parent = t->pcb->in_parent;
 
-
     /* Initialize interrupt frame and load executable. */
     if (success) {
       memset(&if_, 0, sizeof if_);
@@ -216,8 +216,6 @@ static void start_process(void* _arg) {
       if_.eflags = FLAG_IF | FLAG_MBS;
       success = load(local_arg, &if_.eip, &if_.esp);
     }
-
-    
 
     /* Handle failure with succesful PCB malloc. Must free the PCB */
     if (!success && pcb_success) {
@@ -241,7 +239,8 @@ static void start_process(void* _arg) {
         }
         thread_exit();//这里没有释放pcb的pd。会造成内存泄漏嘛?-->process_exit?
     }
-
+    // printf("ready to semaup\n");
+//die here??? get max priority: list is null
     sema_up(&local_in_parent->sema);//加载成功也要释放信号量
 
     /* 通过模拟中断返回来启动用户进程，
@@ -292,7 +291,6 @@ int process_wait(pid_t child_pid) {
             sema_down(&p->sema);//这里进入等待
 
             // printf("[WAIT]wakeup from wait,i'm:%s\n",t->pcb->process_name);
-
             /* 醒来后，获取退出状态并清理 */
             int status = p->exit_status;
             list_remove(e);
@@ -325,7 +323,6 @@ void process_exit(void) {
           否则，我们当前活动的页面目录将是已被释放（并清空）的页面目录。 */
         cur->pcb->pagedir = NULL;
         pagedir_activate(NULL);
-        // printf("[EXIT]i'm:%d,before destroy pd\n",cur->tid);
         pagedir_destroy(pd);
         // printf("[EXIT]i'm:%d,after destroy pd\n",cur->tid);
     }
@@ -346,9 +343,7 @@ void process_exit(void) {
     }
     /* 如果不是fork的，要释放执行文件的写入权限 */
     if(pcb_to_free->elf != NULL){
-        // printf("[EXIT]close %s\n",pcb_to_free->elf);
         file_close(pcb_to_free->elf);
-        // printf("[EXIT]close elf.\n");
     }
 
     cur->pcb = NULL;
@@ -359,13 +354,24 @@ void process_exit(void) {
         struct child_process* child = list_entry(e, struct child_process, elem);
         free(child);
     }
-    /* 这个进程可能没有父进程，只有在非空时才能访问 */
+    /* 可能没有父进程。非空时访问 */
     if(in_parent != NULL){
         in_parent->alive = false;
         /* 父进程一直睡眠到这个进程exit，才被唤醒 */
         if(in_parent->wait_by_parent)
             sema_up(&(in_parent->sema));
     }
+    /* 清理用户锁和sema.由于process_exit会由main_thread调用，此时pthread都已经退出
+       所以直接free即可 */
+    for(int i = 0; i < MAX_LOCK_NUM; i++){
+        if(pcb_to_free->userlock[i] != NULL){
+            free(pcb_to_free->userlock[i]);
+        }
+        if(pcb_to_free->usersema[i] != NULL){
+            free(pcb_to_free->usersema[i]);
+        }
+    }
+    
     free(pcb_to_free);
     thread_exit();
 }
@@ -1093,28 +1099,36 @@ tid_t pthread_join(tid_t tid ) {
    pthread_exit_main() below. */
 void pthread_exit(void) {
     struct thread* t = thread_current();
-    // if(t == t->pcb->main_thread){
-    //     pthread_exit_main();
-    // }else{
-        sema_up(&t->join_sema);
+    if(t == t->pcb->main_thread){
+        pthread_exit_main();
+    }else{
+        if(t->been_joined == true) sema_up(&t->join_sema);
         void* kpage = pagedir_get_page(t->pcb->pagedir,t->user_stack);
         palloc_free_page(kpage);
         pagedir_clear_page(t->pcb->pagedir,t->user_stack);
         list_remove(&t->pcb_elem);
         thread_exit();
-    // }
+    }
 }
 
-/* Only to be used when the main thread explicitly calls pthread_exit.
-   The main thread should wait on all threads in the process to
-   terminate properly, before exiting itself. When it exits itself, it
-   must terminate the process in addition to all necessary duties in
-   pthread_exit.
-
-   This function will be implemented in Project 2: Multithreading. For
-   now, it does nothing. */
+/* 仅当主线程显式调用 pthread_exit 时才使用。
+  主线程应等待进程中的所有线程正常终止后，才能退出自身。
+  当它退出自身时，除了执行 pthread_exit 中规定的所有必要任务外，
+  还必须终止进程。*/
 void pthread_exit_main(void) {
+    struct thread* t = thread_current();
+    if(t != t->pcb->main_thread) return;
 
+    struct process* p = t->pcb;
+    for(struct list_elem* e = list_begin(&p->multi_thread);
+            e != list_end(&p->multi_thread);
+            e = list_next(e))
+    {
+        struct thread* t = list_entry(e,struct thread,pcb_elem);
+        pthread_join(t->tid);
+    }
+    /* 主线程不需要释放stack，因为process_exit会释放 */
+    process_exit();
 }
 
 bool user_lock_init(lock_t* lock) {

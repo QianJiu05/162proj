@@ -40,6 +40,7 @@ int main(int argc, char* argv[]) {
     sema_check_init(&hang_main, 0);
     tid_t main_tid = get_tid();
     pthread_check_create(thread_function, &main_tid);
+    msg("2");
     sema_down(&hang_main);
 
     // Exec a child process that exits

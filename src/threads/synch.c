@@ -103,10 +103,9 @@ struct thread* get_max_priority(struct list* list){
     int max_prio = -1;
     struct thread* max_t = NULL;
     struct list_elem* max_elem = NULL;
-
     for(struct list_elem *e = list_begin(list); e != list_end(list); e = list_next(e)){
         struct thread* t = list_entry(e,struct thread, elem);
-        if(t->priority > max_prio){
+        if(t->priority > max_prio){//在这里出问题，为什么
             max_t = t;
             max_elem = e;
             max_prio = t->priority;
@@ -114,6 +113,10 @@ struct thread* get_max_priority(struct list* list){
     }
     if(max_elem != NULL)
         list_remove(max_elem);
+        
+    if(max_prio == -1){
+        printf("get max priority is -1!\n");
+    }
     return max_t;
 }
 
@@ -131,6 +134,7 @@ void sema_up(struct semaphore* sema) {
 
   if (!list_empty(&sema->waiters)){
     /* 要找最大优先级的唤醒 */
+    // printf("finding biggest\n");
     t = get_max_priority(&sema->waiters);
     /* 把waiter的首个线程就绪 */
     thread_unblock(t);
