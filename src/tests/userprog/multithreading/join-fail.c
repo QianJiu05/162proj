@@ -50,7 +50,7 @@ void self_joiner_function(void* arg_) {
 }
 
 void test_main(void) {
-  syn_msg = true;
+  syn_msg = true;//这行注释了就pass test???
   msg("Main starting");
 
   // Initialize global sema

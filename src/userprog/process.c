@@ -29,6 +29,7 @@ bool load(struct pass_args* arg, void (**eip)(void), void** esp);
 bool setup_thread(void (**eip)(void), void** esp);
 
 struct lock file_lock;
+struct lock user_sema_lock;
 static bool copy_memory(uint32_t* parent,uint32_t* child);
 static void start_fork_process(struct child_process *chpcb);
 
@@ -58,6 +59,7 @@ void userprog_init(void) {
         memset(&t->pcb->fdt,0,sizeof(t->pcb->fdt));
     }
     lock_init(&file_lock);
+    lock_init(&user_sema_lock);
     /* Kill the kernel if we did not succeed */
     ASSERT(success);
 }
@@ -1136,22 +1138,28 @@ bool user_lock_init(lock_t* lock) {
 
     struct process *p = thread_current()->pcb;
 
+    lock_acquire(&user_sema_lock);
     for(int idx = 0; idx < MAX_LOCK_NUM; idx++){
         if(p->userlock[idx] == NULL){
             struct lock* new = malloc(sizeof(struct lock));
-            if(new == NULL)return false;
+            if(new == NULL){
+                lock_release(&user_sema_lock);
+                return false;
+            }
             lock_init(new);
 
             p->userlock[idx] = new;
             *lock = (lock_t)idx;
+            lock_release(&user_sema_lock);
             return true;
         }
     }
+    lock_release(&user_sema_lock);
     return false;
 }
 
-bool user_lock_aquire(lock_t* lock) { 
-    if(lock == NULL || *lock >= MAX_LOCK_NUM || *lock <= 0)return false;
+bool user_lock_acquire(lock_t* lock) { 
+    if(lock == NULL || *lock >= MAX_LOCK_NUM || *lock < 0)return false;
 
     struct thread *t = thread_current();
     struct process *p = t->pcb;
@@ -1163,13 +1171,11 @@ bool user_lock_aquire(lock_t* lock) {
 }
 
 bool user_lock_release(lock_t* lock) {
-    if(lock == NULL || *lock >= MAX_LOCK_NUM || *lock <= 0)return false;
+    if(lock == NULL || *lock >= MAX_LOCK_NUM || *lock < 0)return false;
 
     struct thread *t = thread_current();
     struct process *p = t->pcb;
-    if(*lock >= MAX_LOCK_NUM){
-        return false;
-    }
+
     if(p->userlock[*lock] == NULL || p->userlock[*lock]->holder != t){
         return false;
     }
@@ -1183,17 +1189,23 @@ bool user_sema_init(sema_t* sema, int val) {
 
     struct process *p = thread_current()->pcb;
     
+    lock_acquire(&user_sema_lock);
     for(int idx = 0; idx < MAX_LOCK_NUM; idx++){
         if(p->usersema[idx] == NULL){
             struct semaphore* new = malloc(sizeof(struct semaphore));
-            if(new == NULL)return false;
+            if(new == NULL){
+                lock_release(&user_sema_lock);  
+                return false;
+            }
             sema_init(new,val);
 
             p->usersema[idx] = new;
             *sema = (sema_t)idx;
+            lock_release(&user_sema_lock);
             return true;
         }
     }
+    lock_release(&user_sema_lock);
     return false;
 }
 bool user_sema_up(sema_t* sema) {

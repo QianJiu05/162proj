@@ -87,7 +87,7 @@ void pthread_exit_main(void);
 typedef char lock_t;
 typedef char sema_t;
 bool user_lock_init(lock_t* lock);
-bool user_lock_aquire(lock_t* lock);
+bool user_lock_acquire(lock_t* lock);
 bool user_lock_release(lock_t* lock);
 bool user_sema_init(sema_t* sema, int val);
 bool user_sema_up(sema_t* sema);

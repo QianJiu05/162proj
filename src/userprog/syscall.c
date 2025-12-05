@@ -42,7 +42,7 @@ static tid_t syscall_pt_create(stub_fun sfun, pthread_fun tfun, const void* arg)
 static void syscall_pt_exit(void);
 static tid_t syscall_pt_join(tid_t tid);
 static bool syscall_lock_init(lock_t* lock);
-static bool syscall_lock_aquire(lock_t *lock);
+static bool syscall_lock_acquire(lock_t *lock);
 static bool syscall_lock_release(lock_t *lock);
 static bool syscall_sema_init(sema_t* sema, int val);
 static bool syscall_sema_up(sema_t* sema);
@@ -156,7 +156,7 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
             break;
 
         case SYS_LOCK_ACQUIRE:
-            f->eax = syscall_lock_aquire(args[1]);
+            f->eax = syscall_lock_acquire(args[1]);
             break;
 
         case SYS_LOCK_RELEASE:
@@ -448,8 +448,8 @@ static bool syscall_lock_init(lock_t* lock) {
     return user_lock_init(lock);
     // return ret;
 }
-static bool syscall_lock_aquire(lock_t *lock){
-    return user_lock_aquire(lock);
+static bool syscall_lock_acquire(lock_t *lock){
+    return user_lock_acquire(lock);
 }
 static bool syscall_lock_release(lock_t *lock){
     return user_lock_release(lock);
