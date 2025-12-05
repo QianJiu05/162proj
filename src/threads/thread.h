@@ -68,6 +68,14 @@ typedef int tid_t;
   该断言检查正在运行的线程的“struct thread”中的“magic”成员是否
   设置为 THREAD_MAGIC。堆栈溢出通常会更改此值，从而触发断言。
   */
+ struct thread_status_block{
+      tid_t tid;
+      struct thread* th;
+      bool been_joined;           /* 被thread_join */
+      bool finished;              /* thread finish */
+      struct semaphore join_sema;
+      struct list_elem pcb_elem; /* 挂载到pcb的多线程列表 */
+ };
 /* The `elem' member has a dual purpose.  It can be an element in
    the run queue (thread.c), or it can be an element in a
    semaphore wait list (synch.c).  It can be used these two ways
@@ -95,9 +103,7 @@ struct thread {
   struct thread* parent; /* 通过父线程找到父进程 */
   /* 用户线程才有pcb与多线程 */
   uint8_t* user_stack;
-  struct list_elem pcb_elem; /* 挂载到pcb的多线程列表 */
-  bool been_joined;     /* 被thread_join */
-  struct semaphore join_sema;
+  struct thread_status_block* tsb;  
 #endif
 
   /* Owned by thread.c. */

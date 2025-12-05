@@ -619,9 +619,9 @@ struct Elf32_Phdr {
 /* Values for p_type.  See [ELF1] 2-3. */
 #define PT_NULL 0           /* Ignore. */
 #define PT_LOAD 1           /* Loadable segment. */
-#define PT_DYNAMIC 2        /* Dynamic linking info. */
+#define PT_DYNAMIC 2        /* Dynamic linking tsb. */
 #define PT_INTERP 3         /* Name of dynamic loader. */
-#define PT_NOTE 4           /* Auxiliary info. */
+#define PT_NOTE 4           /* Auxiliary tsb. */
 #define PT_SHLIB 5          /* Reserved. */
 #define PT_PHDR 6           /* Program header table. */
 #define PT_STACK 0x6474e551 /* Stack segment. */
@@ -940,7 +940,7 @@ uint8_t* find_stack_addr(void){
         for(struct list_elem* e = list_begin(&p->multi_thread); e != list_end(&p->multi_thread);
                 e = list_next(e))
         {
-            t = list_entry(e,struct thread,pcb_elem);
+            t = list_entry(e, struct thread_status_block,pcb_elem)->th;
             if(t->user_stack == addr){
                 occupied = true;
                 break;
@@ -1033,35 +1033,42 @@ static void start_pthread(void* exec_ ) {
     /* 激活页表 (共享进程的页表) ,如果不激活，MMU无法转换地址 */
     process_activate();
 
-    list_push_back(&t->pcb->multi_thread,&t->pcb_elem);//t->pcb = null
     memset(&if_, 0, sizeof if_);
     if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
     if_.cs = SEL_UCSEG;
     if_.eflags = FLAG_IF | FLAG_MBS;
-
+    
     /* 把esp指向栈顶 */
     success = setup_thread(&if_.eip,&if_.esp);
     if(success){
       /* 压栈，
-          [arg]
-          [tf]
-          [Ret Addr] <-esp 指向这里
-           并且 eip 指向 sf */
-        char* esp = (char*)if_.esp;
-        esp -= 4; *(void**)esp = exec->arg;
-        esp -= 4; *(void**)esp = exec->tf;
-        esp -= 4; *(void**)esp = 0;
-
-        if_.esp = (void*)esp;
-        if_.eip = exec->sf;
+      [arg]
+      [tf]
+      [Ret Addr] <-esp 指向这里
+      并且 eip 指向 sf */
+      char* esp = (char*)if_.esp;
+      esp -= 4; *(void**)esp = exec->arg;
+      esp -= 4; *(void**)esp = exec->tf;
+      esp -= 4; *(void**)esp = 0;
+      
+      if_.esp = (void*)esp;
+      if_.eip = exec->sf;
     }else{
-        sema_up(&exec->sema);
-        thread_exit();
+      sema_up(&exec->sema);
+      thread_exit();
     }
+    
+    t->tsb = calloc(1,sizeof( struct thread_status_block));
+    t->tsb->tid = t->tid;
+    t->tsb->th = t;
+    t->tsb->been_joined = false;
+    t->tsb->finished = false;
+    sema_init(&t->tsb->join_sema,0);
 
-    sema_init(&t->join_sema,0);
-    t->been_joined = false;
-
+    enum intr_level old_level = intr_disable();
+    list_push_back(&t->pcb->multi_thread,&t->tsb->pcb_elem);
+    intr_set_level(old_level);
+    
     /* 唤醒父线程 */
     exec->success = success;
     sema_up(&exec->sema);
@@ -1079,38 +1086,56 @@ tid_t pthread_join(tid_t tid ) {
     for(struct list_elem* e = list_begin(&p->multi_thread);
             e != list_end(&p->multi_thread); e = list_next(e))
     {
-        struct thread* t = list_entry(e,struct thread, pcb_elem);
-        if(tid == t->tid){
-            if(t->been_joined == true){
+        struct thread_status_block* tsb = list_entry(e, struct thread_status_block, pcb_elem);
+        if(tid == tsb->tid){
+            if(tsb->been_joined == true){
                 return TID_ERROR;
             }
-            t->been_joined = true;
-            sema_down(&t->join_sema);
-            return tid;
+            /* 已完成的直接清理并return */
+            if(tsb->finished == true){
+                enum intr_level old_level = intr_disable();
+                list_remove(&tsb->pcb_elem);
+                intr_set_level(old_level);
+                free(tsb);
+                return tid;
+            }
+            
+          /* tsb->finished == false */
+          tsb->been_joined = true;
+          sema_down(&tsb->join_sema);
+          /* 醒了之后清理这个block,用中断防止竞态 */
+          enum intr_level old_level = intr_disable();
+          list_remove(&tsb->pcb_elem);
+          intr_set_level(old_level);
+          free(tsb);
+
+          return tid;
         }
     }
     return TID_ERROR;
 }
 
-
-/* Free the current thread's resources. Most resources will
-   be freed on thread_exit(), so all we have to do is deallocate the
-   thread's userspace stack. Wake any waiters on this thread.
-
-   The main thread should not use this function. See
-   pthread_exit_main() below. */
+/* 释放当前线程的资源。大多数资源将在 thread_exit() 时释放，
+  因此我们只需释放线程的用户空间栈。唤醒所有在此线程上等待的线程。
+  主线程不应使用此函数。请参见下面的 pthread_exit_main()。 */
 void pthread_exit(void) {
     struct thread* t = thread_current();
     if(t == t->pcb->main_thread){
         pthread_exit_main();
-    }else{
-        if(t->been_joined == true) sema_up(&t->join_sema);
-        void* kpage = pagedir_get_page(t->pcb->pagedir,t->user_stack);
-        palloc_free_page(kpage);
-        pagedir_clear_page(t->pcb->pagedir,t->user_stack);
-        list_remove(&t->pcb_elem);
-        thread_exit();
+        return;//not reached
     }
+    
+    void* kpage = pagedir_get_page(t->pcb->pagedir,t->user_stack);
+    palloc_free_page(kpage);
+    pagedir_clear_page(t->pcb->pagedir,t->user_stack);
+
+    /* 保存退出的status */
+    t->tsb->finished = true;
+    if(t->tsb->been_joined){
+        t->tsb->th = NULL;//线程要退出了
+        sema_up(&t->tsb->join_sema);
+    }
+    thread_exit();
 }
 
 /* 仅当主线程显式调用 pthread_exit 时才使用。
@@ -1121,13 +1146,32 @@ void pthread_exit_main(void) {
     struct thread* t = thread_current();
     if(t != t->pcb->main_thread) return;
 
+    if(t->tsb->been_joined == true){
+        sema_up(&t->tsb->join_sema);
+    }
+    t->tsb->finished = true;
+
     struct process* p = t->pcb;
-    for(struct list_elem* e = list_begin(&p->multi_thread);
-            e != list_end(&p->multi_thread);
-            e = list_next(e))
-    {
-        struct thread* t = list_entry(e,struct thread,pcb_elem);
-        pthread_join(t->tid);
+    /* 由于pthread_join会破坏multi_thread的结构，所以不能使用list_next来迭代
+      应该每次都取head */
+    while(!list_empty(&p->multi_thread)){
+        struct list_elem *e = list_front(&p->multi_thread);
+         struct thread_status_block* tsb = list_entry(e, struct thread_status_block,pcb_elem);
+        /* 防护：若队首正好是主线程（理论上不该发生） */
+        if (tsb->th == p->main_thread) {
+            PANIC("main thread shouldn't in multi_thread\n");
+        }
+
+        /* 清理thread_tsb */
+        if(tsb->finished == false){
+            pthread_join(tsb->tid);
+        }else{
+            /* finish=true，joined=false，手动清理tsb */
+            enum intr_level old_level = intr_disable();
+            list_remove(&tsb->pcb_elem);
+            intr_set_level(old_level);
+            free(tsb);
+        }
     }
     /* 主线程不需要释放stack，因为process_exit会释放 */
     process_exit();

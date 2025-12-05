@@ -513,22 +513,15 @@ static struct thread* next_thread_to_run(void) {
   return (scheduler_jump_table[active_sched_policy])();
 }
 
-/* Completes a thread switch by activating the new thread's page
-   tables, and, if the previous thread is dying, destroying it.
-
-   At this function's invocation, we just switched from thread
-   PREV, the new thread is already running, and interrupts are
-   still disabled.  This function is normally invoked by
-   thread_switch() as its final action before returning, but
-   the first time a thread is scheduled it is called by
-   switch_entry() (see switch.S).
-
-   It's not safe to call printf() until the thread switch is
-   complete.  In practice that means that printf()s should be
-   added at the end of the function.
-
-   After this function and its caller returns, the thread switch
-   is complete. */
+/* 通过激活新线程的页表来完成线程切换，
+  并且，如果之前的线程即将终止，则将其销毁。
+  调用此函数时，我们刚刚从线程 PREV 切换到新线程，
+  新线程已经在运行，并且中断仍然被禁用。
+  此函数通常由 thread_switch() 作为其返回前的最后一个操作调用，
+  但首次调度线程时，它由 switch_entry() 调用（参见 switch.S）。
+  在线程切换完成之前调用 printf() 是不安全的。
+  实际上，这意味着 printf() 应该添加到函数的末尾。
+  此函数及其调用者返回后，线程切换完成。 */
 void thread_switch_tail(struct thread* prev) {
   struct thread* cur = running_thread();
 
@@ -545,11 +538,9 @@ void thread_switch_tail(struct thread* prev) {
   process_activate();
 #endif
 
-  /* If the thread we switched from is dying, destroy its struct
-     thread.  This must happen late so that thread_exit() doesn't
-     pull out the rug under itself.  (We don't free
-     initial_thread because its memory was not obtained via
-     palloc().) */
+  /* 如果我们切换过来的线程即将终止，则销毁其结构体thread。
+    这必须稍后进行，以避免 thread_exit() 函数导致自身崩溃。
+    （我们不释放initial_thread，因为它的内存不是通过palloc() 获取的。） */
   if (prev != NULL && prev->status == THREAD_DYING && prev != initial_thread) {
     ASSERT(prev != cur);
     palloc_free_page(prev);

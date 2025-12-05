@@ -23,9 +23,11 @@ void test_main(void) {
   for (int i = 0; i < NUM_THREADS; i++)
     tids[i] = pthread_check_create(thread_function, &arg);
 
+  //这里有问题。pthread_join
   // Wait on threads
   for (int i = 0; i < NUM_THREADS; i++)
-    pthread_check_join(tids[i]);
+  pthread_check_join(tids[i]);
+  // for(;;);
 
   msg("Main finished");
   syn_msg = false;
