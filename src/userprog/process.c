@@ -99,6 +99,19 @@ struct process_exec_arg{
     char* fn_copy;
     struct child_process* child;
 };
+static int16_t get_fn_len(const char* file_name){
+    int16_t fn_len = 0;
+    while(file_name[fn_len] != ' ' && file_name[fn_len] != '\0'){
+        fn_len++;
+    }
+    return fn_len;
+}
+static void copy_fn_to_fp(char* file_name,char* file_path,int fn_len){
+    for(int i = 0; i < fn_len; i++){
+        file_path[i] = file_name[i];
+    }
+    file_path[fn_len] = '\0';
+}
 /* 启动一个新线程，运行从FILENAME 加载的用户程序。
    新线程可能在 process_execute() 返回之前被调度（甚至可能退出）。
    返回新进程的进程 ID，如果无法创建线程，则返回 TID_ERROR。*/
@@ -113,16 +126,11 @@ pid_t process_execute(const char* file_name) {
         return TID_ERROR;
     strlcpy(fn_copy, file_name, PGSIZE);
 
-    int16_t fn_len = 0;
-    while(file_name[fn_len] != ' ' && file_name[fn_len] != '\0'){
-        fn_len++;
-    }
+    int16_t fn_len = get_fn_len(file_name);
 
     char file_path[fn_len+1];
-    for(int i = 0; i < fn_len; i++){
-        file_path[i] = file_name[i];
-    }
-    file_path[fn_len] = '\0';
+    copy_fn_to_fp(file_name,file_path,fn_len);
+
 
     /* 此时还在父进程中 */
     struct thread* t = thread_current();
@@ -132,14 +140,13 @@ pid_t process_execute(const char* file_name) {
     child->create_success = false;
     child->exit_status = -1;
     sema_init(&(child->sema),0);
-    list_push_back(&(t->pcb->child_list),&(child->elem));
+    list_push_back(&(t->pcb->child_list),&(child->elem));//要关中断吗？
 
     struct process_exec_arg* proc_arg = malloc(sizeof(struct process_exec_arg));
     proc_arg->child = child;
     proc_arg->fn_copy = fn_copy;
 
     /* Create a new thread to execute FILE_NAME. */
-    // tid = thread_create(file_path, PRI_DEFAULT, start_process, fn_copy);
     tid = thread_create(file_path, PRI_DEFAULT, start_process, proc_arg);
     if (tid == TID_ERROR){
         palloc_free_page(fn_copy);
@@ -151,9 +158,7 @@ pid_t process_execute(const char* file_name) {
 
     /* 让父进程进入等待，创建子进程后唤醒父进程，
         不论是否成功，然后初始化child_PCB并返回tid */
-        // printf("ready to semadown\n");
-        sema_down(&child->sema);
-        // printf("wakeup\n");
+    sema_down(&child->sema);
     free(proc_arg);
 
     // printf("[EXEC]wake up from child exec,i'm:%s,child = %d\n",t->pcb->process_name,child->pid);
@@ -171,9 +176,8 @@ static void start_process(void* _arg) {
     struct process_exec_arg* proc_arg = (struct process_exec_arg*)_arg;
 
     struct pass_args local;
-    struct pass_args* local_arg = &local;
-    init_arg(local_arg);
-    parse_args(proc_arg->fn_copy,local_arg);
+    init_arg(&local);
+    parse_args(proc_arg->fn_copy,&local);
     
     struct thread* t = thread_current();
     struct intr_frame if_;
@@ -216,7 +220,7 @@ static void start_process(void* _arg) {
       if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
       if_.cs = SEL_UCSEG;
       if_.eflags = FLAG_IF | FLAG_MBS;
-      success = load(local_arg, &if_.eip, &if_.esp);
+      success = load(&local, &if_.eip, &if_.esp);
     }
 
     /* Handle failure with succesful PCB malloc. Must free the PCB */
@@ -241,8 +245,7 @@ static void start_process(void* _arg) {
         }
         thread_exit();//这里没有释放pcb的pd。会造成内存泄漏嘛?-->process_exit?
     }
-    // printf("ready to semaup\n");
-//die here??? get max priority: list is null
+//die here??? get max priority: list is mess
     sema_up(&local_in_parent->sema);//加载成功也要释放信号量
 
     /* 通过模拟中断返回来启动用户进程，
