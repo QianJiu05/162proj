@@ -23,7 +23,7 @@
 /* List of processes in THREAD_READY state, that is, processes
    that are ready to run but not actually running. */
 static struct list fifo_ready_list;
-static struct list prio_ready_list;
+// static struct list prio_ready_list;
 
 /* List of all processes.  Processes are added to this list
    when they are first scheduled and removed when they exit. */
@@ -101,9 +101,17 @@ void thread_init(void) {
   ASSERT(intr_get_level() == INTR_OFF);
 
   lock_init(&tid_lock);
-  if(active_sched_policy == SCHED_FIFO || active_sched_policy == SCHED_PRIO){
-      list_init(&fifo_ready_list);
+  switch(active_sched_policy){
+      case SCHED_FAIR:
+          // break;
+      case SCHED_FIFO:
+      case SCHED_PRIO:
+      default:
+          list_init(&fifo_ready_list);
   }
+  // if(active_sched_policy == SCHED_FIFO || active_sched_policy == SCHED_PRIO){
+  //     list_init(&fifo_ready_list);
+  // }
   // else if(active_sched_policy == SCHED_PRIO){
   //     list_init(&prio_ready_list);
   // }
@@ -114,8 +122,6 @@ void thread_init(void) {
   init_thread(initial_thread, "main", PRI_DEFAULT);
   initial_thread->status = THREAD_RUNNING;
   initial_thread->tid = allocate_tid();
-  // initial_thread->waiting_lock = NULL;
-  // list_init(&initial_thread->holding_lock);
 }
 
 /* Starts preemptive thread scheduling by enabling interrupts.
@@ -242,7 +248,7 @@ static void thread_enqueue(struct thread* t) {
   ASSERT(is_thread(t));
 
   /* prio可以直接复用fifo的list，因为插入时是不需要有序的 */
-  if (active_sched_policy == SCHED_FIFO || active_sched_policy == SCHED_PRIO){
+  if (active_sched_policy == SCHED_FIFO || active_sched_policy == SCHED_PRIO ||active_sched_policy == SCHED_FAIR){
       list_push_back(&fifo_ready_list, &t->elem);
   }
   // else if(active_sched_policy == SCHED_PRIO){
@@ -491,7 +497,11 @@ static struct thread* thread_schedule_prio(void) {
 
 /* Fair priority scheduler */
 static struct thread* thread_schedule_fair(void) {
-  PANIC("Unimplemented scheduler policy: \"-sched=fair\"");
+  // PANIC("Unimplemented scheduler policy: \"-sched=fair\"");
+  if(!list_empty(&fifo_ready_list)){
+      return list_entry(list_pop_front(&fifo_ready_list), struct thread, elem);
+  }  else
+    return idle_thread;
 }
 
 /* Multi-level feedback queue scheduler */

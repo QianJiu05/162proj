@@ -1,6 +1,4 @@
-/* Ensures that the fair scheduler allows low-priority threads to
-   make forward progress, even in the presence of high-priority
-   threads. */
+/* 确保公平调度器允许低优先级线程即使在存在高优先级线程的情况下也能继续推进。 */
 
 #include <stdio.h>
 #include "tests/threads/tests.h"
