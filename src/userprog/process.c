@@ -990,7 +990,7 @@ struct exec_arg{
   返回新线程的 TID，如果线程无法正确创建，则返回 TID_ERROR。
   并且应该类似于 process_execute()。
 */
-tid_t pthread_execute(stub_fun sf , pthread_fun tf , void* arg ) {
+tid_t pthread_execute(stub_fun sf , pthread_fun tf , const void* arg ) {
     struct exec_arg* thread_arg = calloc(sizeof(struct exec_arg),1);
     if(thread_arg == NULL){
         return TID_ERROR;

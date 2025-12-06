@@ -47,7 +47,7 @@ static bool syscall_lock_release(lock_t *lock);
 static bool syscall_sema_init(sema_t* sema, int val);
 static bool syscall_sema_up(sema_t* sema);
 static bool syscall_sema_down(sema_t* sema);
-// static tid_t syscall_get_tid(void)
+static tid_t syscall_get_tid(void);
 
 
 //arg[0]是调用号，其余是参数
@@ -152,27 +152,31 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
 
         case SYS_LOCK_INIT:
             // check_valid_num(args[1]);
-            f->eax = syscall_lock_init(args[1]);
+            f->eax = syscall_lock_init((lock_t*)args[1]);
             break;
 
         case SYS_LOCK_ACQUIRE:
-            f->eax = syscall_lock_acquire(args[1]);
+            f->eax = syscall_lock_acquire((lock_t*)args[1]);
             break;
 
         case SYS_LOCK_RELEASE:
-            f->eax = syscall_lock_release(args[1]);
+            f->eax = syscall_lock_release((lock_t*)args[1]);
             break;
 
         case SYS_SEMA_INIT:
-            f->eax = syscall_sema_init(args[1],args[2]);
+            f->eax = syscall_sema_init((sema_t*)args[1],args[2]);
             break;
 
         case SYS_SEMA_DOWN:
-            f->eax = syscall_sema_down(args[1]);
+            f->eax = syscall_sema_down((sema_t*)args[1]);
             break;
 
         case SYS_SEMA_UP:
-            f->eax = syscall_sema_up(args[1]);
+            f->eax = syscall_sema_up((sema_t*)args[1]);
+            break;
+
+        case SYS_GET_TID:
+            f->eax = syscall_get_tid();
             break;
     }
 }
@@ -463,6 +467,6 @@ static bool syscall_sema_up(sema_t* sema){
 static bool syscall_sema_down(sema_t* sema){
     return user_sema_down(sema);
 }
-// static tid_t syscall_get_tid(void){
-//     return thread_tid();
-// }
+static tid_t syscall_get_tid(void){
+    return thread_tid();
+}
