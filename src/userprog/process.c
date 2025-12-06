@@ -211,6 +211,17 @@ static void start_process(void* _arg) {
       memset(t->pcb->userlock,0,sizeof(lock_t*)*MAX_LOCK_NUM);
       memset(t->pcb->usersema,0,sizeof(lock_t*)*MAX_LOCK_NUM);
 
+      t->tsb = calloc(1,sizeof( struct thread_status_block));
+      t->tsb->tid = t->tid;
+      t->tsb->th = t;
+      t->tsb->been_joined = false;
+      t->tsb->finished = false;
+      sema_init(&t->tsb->join_sema,0);
+
+      // enum intr_level old_level = intr_disable();
+      // list_push_back(&t->pcb->multi_thread,&t->tsb->pcb_elem);
+      // intr_set_level(old_level);
+
       if(proc_arg->child != NULL){
           t->pcb->in_parent = proc_arg->child;
           proc_arg->child->alive = true;
@@ -1090,7 +1101,31 @@ static void start_pthread(void* exec_ ) {
 tid_t pthread_join(tid_t tid ) { 
     struct process * p = thread_current()->pcb;
 
-    
+    if(p->main_thread->tid == tid){
+        struct thread_status_block* tsb = p->main_thread->tsb;
+          if(tsb->been_joined == true){
+              return TID_ERROR;
+          }
+          /* 已完成的直接清理并return */
+          if(tsb->finished == true){
+              enum intr_level old_level = intr_disable();
+              list_remove(&tsb->pcb_elem);
+              intr_set_level(old_level);
+              free(tsb);
+              return tid;
+          }
+            
+          /* tsb->finished == false */
+          tsb->been_joined = true;
+          sema_down(&tsb->join_sema);
+          /* 醒了之后清理这个block,用中断防止竞态 */
+          enum intr_level old_level = intr_disable();
+          list_remove(&tsb->pcb_elem);
+          intr_set_level(old_level);
+          free(tsb);
+
+          return tid;
+    }
 
     for(struct list_elem* e = list_begin(&p->multi_thread);
             e != list_end(&p->multi_thread); e = list_next(e))
@@ -1130,6 +1165,9 @@ tid_t pthread_join(tid_t tid ) {
 void pthread_exit(void) {
     struct thread* t = thread_current();
     if(t == t->pcb->main_thread){
+        if(t->tsb->been_joined){
+            sema_up(&t->tsb->join_sema);
+        }
         pthread_exit_main();
         return;//not reached
     }

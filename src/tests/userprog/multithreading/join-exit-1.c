@@ -1,8 +1,8 @@
-/* Main spanws a thread that joins on main.
-   Then, main pthread_exit()s and wakes the joiner.
-   pthread_exit() on main waits for all unjoined threads.
-   So main should wait for the created thread to finish executing.
-   Then, main should terminate the process gracefully with exit code 0 */
+/* Main 函数会创建一个新线程，该线程会join到 Main 函数中。
+然后，Main 函数调用 pthread_exit() 并唤醒join线程。
+Main 函数的 pthread_exit() 会等待所有未join的线程完成。
+因此，Main 函数应该等待新创建的线程执行完毕。
+之后，Main 函数应该以退出代码 0 优雅地终止进程。 */
 
 #include "tests/lib.h"
 #include "tests/main.h"
