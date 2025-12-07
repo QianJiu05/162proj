@@ -1101,62 +1101,46 @@ static void start_pthread(void* exec_ ) {
 tid_t pthread_join(tid_t tid ) { 
     struct process * p = thread_current()->pcb;
 
+    struct thread_status_block* tsb = NULL;
+
     if(p->main_thread->tid == tid){
-        struct thread_status_block* tsb = p->main_thread->tsb;
-          if(tsb->been_joined == true){
-              return TID_ERROR;
-          }
-          /* 已完成的直接清理并return */
-          if(tsb->finished == true){
-              enum intr_level old_level = intr_disable();
-              list_remove(&tsb->pcb_elem);
-              intr_set_level(old_level);
-              free(tsb);
-              return tid;
-          }
-            
-          /* tsb->finished == false */
-          tsb->been_joined = true;
-          sema_down(&tsb->join_sema);
-          /* 醒了之后清理这个block,用中断防止竞态 */
-          enum intr_level old_level = intr_disable();
-          list_remove(&tsb->pcb_elem);
-          intr_set_level(old_level);
-          free(tsb);
-
-          return tid;
-    }
-
-    for(struct list_elem* e = list_begin(&p->multi_thread);
+          tsb = p->main_thread->tsb;
+    }else{
+          for(struct list_elem* e = list_begin(&p->multi_thread);
             e != list_end(&p->multi_thread); e = list_next(e))
-    {
-        struct thread_status_block* tsb = list_entry(e, struct thread_status_block, pcb_elem);
-        if(tid == tsb->tid){
-            if(tsb->been_joined == true){
-                return TID_ERROR;
-            }
-            /* 已完成的直接清理并return */
-            if(tsb->finished == true){
-                enum intr_level old_level = intr_disable();
-                list_remove(&tsb->pcb_elem);
-                intr_set_level(old_level);
-                free(tsb);
-                return tid;
-            }
-            
-          /* tsb->finished == false */
-          tsb->been_joined = true;
-          sema_down(&tsb->join_sema);
-          /* 醒了之后清理这个block,用中断防止竞态 */
-          enum intr_level old_level = intr_disable();
-          list_remove(&tsb->pcb_elem);
-          intr_set_level(old_level);
-          free(tsb);
+          {
+              struct thread_status_block* multi = list_entry(e, struct thread_status_block, pcb_elem);
+              if(multi->tid == tid){
+                  tsb = multi;
+                  break;
+              }
+          }
 
-          return tid;
-        }
     }
-    return TID_ERROR;
+    /* 找不到tsb */
+    if(tsb == NULL){return TID_ERROR;}
+
+    if(tsb->been_joined == true){ return TID_ERROR; }
+
+    /* 已完成的直接清理并return */
+    if(tsb->finished == true){
+        enum intr_level old_level = intr_disable();
+        list_remove(&tsb->pcb_elem);
+        intr_set_level(old_level);
+        free(tsb);
+        return tid;
+    }
+
+    /* 未完成:tsb->finished == false */
+    tsb->been_joined = true;
+    sema_down(&tsb->join_sema);
+    /* 醒了之后清理这个block,用中断防止竞态 */
+    enum intr_level old_level = intr_disable();
+    list_remove(&tsb->pcb_elem);
+    intr_set_level(old_level);
+    free(tsb);
+
+    return tid;
 }
 
 /* 释放当前线程的资源。大多数资源将在 thread_exit() 时释放，
