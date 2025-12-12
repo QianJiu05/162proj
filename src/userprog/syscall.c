@@ -25,7 +25,7 @@ void syscall_init(void) {
     sema_init(&global,1);
 }
 
-static void syscall_exit(int status);
+void syscall_exit(int status);
 static uint32_t syscall_exec(const char* file_name);
 static bool syscall_create(const char *file, unsigned initial_size);
 static bool syscall_remove(const char *file);
@@ -250,7 +250,7 @@ static void check_valid_buffer(const void* buffer, size_t size){
         }
     }    
 }
-static void syscall_exit(int status){
+void syscall_exit(int status){
     printf("%s: exit(%d)\n", thread_current()->pcb->process_name, status);
 
     struct thread* cur = thread_current();

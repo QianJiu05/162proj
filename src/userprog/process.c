@@ -20,6 +20,8 @@
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 
+#include "userprog/syscall.h"
+
 #include "threads/pte.h"
 #include "filesys/file.h"
 
@@ -1102,19 +1104,21 @@ tid_t pthread_join(tid_t tid ) {
     struct process * p = thread_current()->pcb;
 
     struct thread_status_block* tsb = NULL;
+    bool should_do_clean = true;
 
-    if(p->main_thread->tid == tid){
-          tsb = p->main_thread->tsb;
-    }else{
-          for(struct list_elem* e = list_begin(&p->multi_thread);
-            e != list_end(&p->multi_thread); e = list_next(e))
-          {
-              struct thread_status_block* multi = list_entry(e, struct thread_status_block, pcb_elem);
-              if(multi->tid == tid){
-                  tsb = multi;
-                  break;
-              }
-          }
+    if(p->main_thread->tid == tid) {
+        tsb = p->main_thread->tsb;
+        should_do_clean = false;
+    } else {
+        for(struct list_elem* e = list_begin(&p->multi_thread);
+          e != list_end(&p->multi_thread); e = list_next(e))
+        {
+            struct thread_status_block* multi = list_entry(e, struct thread_status_block, pcb_elem);
+            if(multi->tid == tid){
+                tsb = multi;
+                break;
+            }
+        }
 
     }
     /* 找不到tsb */
@@ -1122,23 +1126,29 @@ tid_t pthread_join(tid_t tid ) {
 
     if(tsb->been_joined == true){ return TID_ERROR; }
 
-    /* 已完成的直接清理并return */
+    /* 已完成的,非main，直接清理并return */
     if(tsb->finished == true){
-        enum intr_level old_level = intr_disable();
-        list_remove(&tsb->pcb_elem);
-        intr_set_level(old_level);
-        free(tsb);
+        if(should_do_clean) {
+            enum intr_level old_level = intr_disable();
+            list_remove(&tsb->pcb_elem);
+            intr_set_level(old_level);
+            free(tsb);
+        }
         return tid;
     }
 
     /* 未完成:tsb->finished == false */
     tsb->been_joined = true;
     sema_down(&tsb->join_sema);
-    /* 醒了之后清理这个block,用中断防止竞态 */
-    enum intr_level old_level = intr_disable();
-    list_remove(&tsb->pcb_elem);
-    intr_set_level(old_level);
-    free(tsb);
+
+    /* 醒了之后清理这个block,用中断防止竞态
+        main的tsb不能被clean，因为不在multi_list */
+    if(should_do_clean) {
+        enum intr_level old_level = intr_disable();
+        list_remove(&tsb->pcb_elem);
+        intr_set_level(old_level);
+        free(tsb);
+    }
 
     return tid;
 }
@@ -1147,9 +1157,11 @@ tid_t pthread_join(tid_t tid ) {
   因此我们只需释放线程的用户空间栈。唤醒所有在此线程上等待的线程。
   主线程不应使用此函数。请参见下面的 pthread_exit_main()。 */
 void pthread_exit(void) {
-    struct thread* t = thread_current();
+  struct thread* t = thread_current();
+  // printf("pthread exit, tid = %d\n",t->tid);
     if(t == t->pcb->main_thread){
         if(t->tsb->been_joined){
+            // printf("main been joined,sema up waiter\n");
             sema_up(&t->tsb->join_sema);
         }
         pthread_exit_main();
@@ -1174,12 +1186,13 @@ void pthread_exit(void) {
   当它退出自身时，除了执行 pthread_exit 中规定的所有必要任务外，
   还必须终止进程。*/
 void pthread_exit_main(void) {
+  // printf("pthread exit main\n");
     struct thread* t = thread_current();
     if(t != t->pcb->main_thread) return;
 
-    if(t->tsb->been_joined == true){
-        sema_up(&t->tsb->join_sema);
-    }
+    // if(t->tsb->been_joined == true){
+    //     sema_up(&t->tsb->join_sema);
+    // }
     t->tsb->finished = true;
 
     struct process* p = t->pcb;
@@ -1187,27 +1200,43 @@ void pthread_exit_main(void) {
       应该每次都取head */
     while(!list_empty(&p->multi_thread)){
         struct list_elem *e = list_front(&p->multi_thread);
-         struct thread_status_block* tsb = list_entry(e, struct thread_status_block,pcb_elem);
-        /* 防护：若队首正好是主线程（理论上不该发生） */
-        if (tsb->th == p->main_thread) {
-            PANIC("main thread shouldn't in multi_thread\n");
-        }
+        bool handled = false;
 
-        /* 清理thread_tsb */
-        if(tsb->finished == false){
-            pthread_join(tsb->tid);
-        }else{
-            /* finish=true，joined=false，手动清理tsb */
-            enum intr_level old_level = intr_disable();
-            list_remove(&tsb->pcb_elem);
-            intr_set_level(old_level);
-            free(tsb);
+        while(e != list_end(&p->multi_thread)){
+            struct thread_status_block* tsb = list_entry(e, struct thread_status_block,pcb_elem);
+            /* 防护：主线程理论上不该发生在这个队列中 */
+            ASSERT(tsb->th != p->main_thread);
+            
+            /* 被join的不要处理 */
+            if(tsb->been_joined == true) {
+                e = list_next(e);
+                continue;
+            }
+
+            /* !been_joined */
+            if(tsb->finished == false) {
+                /* pthread_join醒了之后直接把tsb清理掉了,迭代器失效了要从头获取 */
+                pthread_join(tsb->tid);
+                handled = true;
+            } else {/* finish=true，joined=false，手动清理tsb,在清理前可以使用迭代器 */
+                enum intr_level old_level = intr_disable();
+                e = list_next(e);
+                list_remove(&tsb->pcb_elem);
+                intr_set_level(old_level);
+                free(tsb);
+            }
+
+            if(handled) { break; }
+
         }
     }
     /* 主线程不需要释放stack，因为process_exit会释放 */
-    process_exit();
+    syscall_exit(0);
+    // process_exit();
 }
 
+
+/* ====================  user sync part ====================  */
 bool user_lock_init(lock_t* lock) {
     if(lock == NULL)return false;
 

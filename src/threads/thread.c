@@ -103,7 +103,7 @@ void thread_init(void) {
   lock_init(&tid_lock);
   switch(active_sched_policy){
       case SCHED_FAIR:
-          // break;
+          break;
       case SCHED_FIFO:
       case SCHED_PRIO:
       default:
@@ -248,7 +248,7 @@ static void thread_enqueue(struct thread* t) {
   ASSERT(is_thread(t));
 
   /* prio可以直接复用fifo的list，因为插入时是不需要有序的 */
-  if (active_sched_policy == SCHED_FIFO || active_sched_policy == SCHED_PRIO ||active_sched_policy == SCHED_FAIR){
+  if (active_sched_policy == SCHED_FIFO || active_sched_policy == SCHED_PRIO || active_sched_policy == SCHED_FAIR){
       list_push_back(&fifo_ready_list, &t->elem);
   }
   // else if(active_sched_policy == SCHED_PRIO){
