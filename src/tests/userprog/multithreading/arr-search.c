@@ -94,9 +94,14 @@ void test_main(void) {
   for (int i = 0; i < ARR_SIZE; i++)
     arr[i] = ARR_SIZE - i - 1;
 
+    
+  
   // Spawn threads to search for elements in the array
   for (int i = 0; i < ARR_SIZE; i++)
     search_and_check(i);
+  //die here!
+
+  // msg("==============");
 
   // Spawn threads to search for elements not in the array
   for (int i = -ARR_SIZE; i < 0; i++)

@@ -32,6 +32,8 @@ bool setup_thread(void (**eip)(void), void** esp);
 
 struct lock file_lock;
 struct lock user_sema_lock;
+struct lock pthread_lock;
+
 static bool copy_memory(uint32_t* parent,uint32_t* child);
 static void start_fork_process(struct child_process *chpcb);
 
@@ -62,6 +64,7 @@ void userprog_init(void) {
     }
     lock_init(&file_lock);
     lock_init(&user_sema_lock);
+    lock_init(&pthread_lock);
     /* Kill the kernel if we did not succeed */
     ASSERT(success);
 }
@@ -954,20 +957,33 @@ uint8_t* find_stack_addr(void){
     struct process* p = thread_current()->pcb;
     struct thread* t = NULL;
 
+    if (p == NULL || p->pagedir == NULL) {
+        printf("pd is NULL!\n");
+        return NULL;
+    }
     while(addr > (uint8_t*)0x08048000){
         bool occupied = false;
+
+        enum intr_level old_level = intr_disable();
         /* 遍历当前threads，查看地址是否已经被占用 */
         for(struct list_elem* e = list_begin(&p->multi_thread); e != list_end(&p->multi_thread);
                 e = list_next(e))
         {
-            t = list_entry(e, struct thread_status_block,pcb_elem)->th;
-            if(t->user_stack == addr){
+            struct thread_status_block* tsb = list_entry(e, struct thread_status_block,pcb_elem);
+            /* 对于已经完成的tsb，tsb->th已经被释放了，不能访问到user_stack了 */
+            if(tsb->finished == true){ continue; }
+            t = tsb->th;
+            
+            if( t->user_stack == addr){
                 occupied = true;
                 break;
             }
         }
+        intr_set_level(old_level);
+
         if(occupied == false && pagedir_get_page(p->pagedir,addr) == NULL){
-                return addr;
+            // printf("find addr:%p\n",addr);
+            return addr;
         }
         addr -= PGSIZE;
     }
@@ -984,14 +1000,26 @@ bool setup_thread(void (**eip)(void) , void** esp ) {
     /* 申请一块地址，把这个地址install到合适的位置 */
     kpage = palloc_get_page(PAL_USER | PAL_ZERO);
     if (kpage != NULL) {
+        lock_acquire(&pthread_lock);
+
         stack_addr = find_stack_addr();
+
+        if(stack_addr == NULL){
+            printf("get empty stackaddr\n");
+            palloc_free_page(kpage);
+            lock_release(&pthread_lock);
+            return success;
+        }
+        
         success = install_page(((uint8_t*)stack_addr), kpage, true);
         if (success){
-          thread_current()->user_stack = stack_addr;
-          *esp = stack_addr + PGSIZE;//栈顶
+            thread_current()->user_stack = stack_addr;
+            *esp = stack_addr + PGSIZE;//栈顶
         }
         else
-          palloc_free_page(kpage);
+            palloc_free_page(kpage);
+
+        lock_release(&pthread_lock);
     }
     return success;
 }
@@ -1106,10 +1134,15 @@ tid_t pthread_join(tid_t tid ) {
     struct thread_status_block* tsb = NULL;
     bool should_do_clean = true;
 
+    enum intr_level old_level;
+
     if(p->main_thread->tid == tid) {
         tsb = p->main_thread->tsb;
         should_do_clean = false;
     } else {
+
+        /* ⭐ 修复：全程关中断保护查找和状态检查，防止竞态 */
+        old_level = intr_disable();
         for(struct list_elem* e = list_begin(&p->multi_thread);
           e != list_end(&p->multi_thread); e = list_next(e))
         {
@@ -1120,16 +1153,19 @@ tid_t pthread_join(tid_t tid ) {
             }
         }
 
+
     }
+    intr_set_level(old_level);
+
     /* 找不到tsb */
     if(tsb == NULL){return TID_ERROR;}
 
     if(tsb->been_joined == true){ return TID_ERROR; }
 
+    old_level = intr_disable();
     /* 已完成的,非main，直接清理并return */
     if(tsb->finished == true){
         if(should_do_clean) {
-            enum intr_level old_level = intr_disable();
             list_remove(&tsb->pcb_elem);
             intr_set_level(old_level);
             free(tsb);
@@ -1144,7 +1180,7 @@ tid_t pthread_join(tid_t tid ) {
     /* 醒了之后清理这个block,用中断防止竞态
         main的tsb不能被clean，因为不在multi_list */
     if(should_do_clean) {
-        enum intr_level old_level = intr_disable();
+        // enum intr_level old_level = intr_disable();
         list_remove(&tsb->pcb_elem);
         intr_set_level(old_level);
         free(tsb);
@@ -1175,9 +1211,9 @@ void pthread_exit(void) {
     /* 保存退出的status */
     t->tsb->finished = true;
     if(t->tsb->been_joined){
-        t->tsb->th = NULL;//线程要退出了
-        sema_up(&t->tsb->join_sema);
+      sema_up(&t->tsb->join_sema);
     }
+    t->tsb->th = NULL;//线程要退出了
     thread_exit();
 }
 
