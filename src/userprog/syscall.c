@@ -261,18 +261,13 @@ void syscall_exit(int status){
     process_exit();//程序运行到这里就结束了，不会有返回值
 }
 static uint32_t syscall_exec(const char* file_name){
-    // sema_down(&global);
-    int exec_pid = process_execute(file_name);
-    // sema_up(&global);
-    return exec_pid;
+    return process_execute(file_name);
 }
 static bool syscall_create(const char *file, unsigned initial_size){
-    bool success = filesys_create(file,initial_size);
-    return success;
+    return filesys_create(file,initial_size);
 }
 static bool syscall_remove(const char *file){
-    bool success = filesys_remove(file);
-    return success;
+    return  filesys_remove(file);
 }
 static int syscall_open(const char *file){
     struct file* ptr = NULL;
@@ -280,9 +275,7 @@ static int syscall_open(const char *file){
     ptr = filesys_open(file);
     sema_up(&global);
 
-    if(ptr == NULL){
-        return -1;
-    }
+    if(ptr == NULL){ return -1; }
 
     //应该从pcb的fd进行对比，找到在不在，然后更新
     struct file_descript_table* entry = &(thread_current()->pcb->fdt);
@@ -292,26 +285,18 @@ static int syscall_open(const char *file){
     for(size_t i = 3; i < MAX_FD_NUM; i++){
         /* 先判断有没有在使用 */
         if(entry->using[i] == true){
-            if(ptr == entry->file_ptr[i]){
-                return i;
-            }
+            if(ptr == entry->file_ptr[i]){ return i; }
         }else{
-            if(idx_unused == -1){
-                idx_unused = i;
-            }
+            if(idx_unused == -1){ idx_unused = i; }
         }
     }
     /* 没有return，没找到对应的 */
-    if(idx_unused == -1){
-        return -1;
-    }
-    // printf("fd = %d\n",idx_unused);
+    if(idx_unused == -1){ return -1; }
     /* 没满 */
     entry->using[idx_unused] = true;
     entry->file_ptr[idx_unused] = ptr;
 
     return idx_unused;
-
 }
 static int syscall_filesize(int fd){
     struct process* p = thread_current()->pcb;
@@ -382,9 +367,7 @@ static int syscall_write(int fd, void* buffer, size_t size){
 
     if(fd > 2){
         struct process* p = thread_current()->pcb;
-        if(p->fdt.using[fd] == false){
-            return -1;
-        }
+        if(p->fdt.using[fd] == false){ return -1; }
         sema_down(&global);
         int ret = file_write(p->fdt.file_ptr[fd],buffer,size);
         sema_up(&global);
@@ -392,13 +375,9 @@ static int syscall_write(int fd, void* buffer, size_t size){
     }
 }
 static void syscall_seek(int fd,unsigned position){
-    if(fd <= 2 || fd >= MAX_FD_NUM){
-        return;
-    }
+    if(fd <= 2 || fd >= MAX_FD_NUM){ return; }
     struct process* p = thread_current()->pcb;
-        if(p->fdt.using[fd] == false){
-            return ;
-        }
+    if(p->fdt.using[fd] == false){ return ; }
     sema_down(&global);
     file_seek(p->fdt.file_ptr[fd],position);
     sema_up(&global);
@@ -433,9 +412,10 @@ static pid_t syscall_fork(struct intr_frame* f){
     struct thread* t = thread_current();
     /* 保存父进程的寄存器状态，用于模拟中断 */
     t->pcb->saved_if = *f;
-    pid_t pid;
-    pid = process_fork();
-    return pid;
+    // pid_t pid;
+    // pid = process_fork();
+    // return pid;
+    return process_fork();
 }
 static tid_t syscall_pt_create(stub_fun sfun, pthread_fun tfun, const void* arg){
     return pthread_execute(sfun,tfun,arg);
@@ -447,10 +427,7 @@ static tid_t syscall_pt_join(tid_t tid){
     return pthread_join(tid);
 }
 static bool syscall_lock_init(lock_t* lock) {
-    // bool ret = user_lock_init(lock);
-    // printf("init:%d\n",ret);
     return user_lock_init(lock);
-    // return ret;
 }
 static bool syscall_lock_acquire(lock_t *lock){
     return user_lock_acquire(lock);

@@ -1,7 +1,6 @@
-/* Spawns a new process that spawns many child threads that each
-   access file resources. Then, kills the whole process via exit/exception.
-   Then, the original process tries to access file resources itself to make
-   sure resources were cleanly handled on child process exit */
+/* 创建一个新进程，该进程会生成多个子线程，每个子线程都会访问文件资源。
+  然后，通过退出/异常终止整个进程。之后，原始进程会尝试自行访问文件资源，以
+  确保子进程退出时资源已得到妥善处理。 */
 
 #include "tests/userprog/sample.inc"
 #include "tests/lib.h"

@@ -287,9 +287,7 @@ int process_wait(pid_t child_pid) {
     struct list* child = &(t->pcb->child_list);
 
     /* 没有子进程 */
-    if(list_empty(child)){
-        return -1;
-    }
+    if(list_empty(child)){ return -1; }
     /* 遍历子进程list找pid */
     for(struct list_elem* e = list_begin(child); 
             e != list_end(child); e = list_next(e))
@@ -306,9 +304,7 @@ int process_wait(pid_t child_pid) {
             }
 
             /* 已经被等待，立刻return-1 */
-            if(p->wait_by_parent == true){
-                return -1;
-            }
+            if(p->wait_by_parent == true){ return -1; }
 
             /* 没死&没被等待，进入等待 */
             p->wait_by_parent = true;
@@ -484,27 +480,10 @@ static void start_fork_process(struct child_process *chpcb){
         }
     }
     /* 建立与父进程的连接 */
-    // t->pcb->in_parent = NULL;
     t->pcb->in_parent = chpcb;
     chpcb->alive = true;
     chpcb->create_success = true;
-    // struct thread* parent_thread = t->parent;
-    // if(parent_thread != NULL && parent_thread->pcb != NULL){
-    //     for(struct list_elem *e = list_begin(&(parent_thread->pcb->child_list));
-    //             e != list_end(&(parent_thread->pcb->child_list));
-    //             e = list_next(e))
-    //     {
-    //         struct child_process* ch_pcb = list_entry(e,struct child_process,elem);
-    //         if(ch_pcb->pid == t->tid){
-    //             t->pcb->in_parent = ch_pcb;
-    //             /* 标记为alive，如果创建失败改成false */
-    //             ch_pcb->alive = true;
-    //             ch_pcb->create_success = true;
-    //             break;
-    //         }
-    //     }
-    // }
-    // printf("[START]copy mem\n");
+
     success = copy_memory(t->parent->pcb->pagedir,t->pcb->pagedir);
     if(success == false){
         goto fail;
