@@ -12,17 +12,18 @@
 #include "filesys/file.h"
 #include "devices/input.h"
 
-struct semaphore global;
+struct lock global;
 static void syscall_handler(struct intr_frame*);
 
 static void check_valid_num(uint32_t* args);
 static void check_valid_str(const char* str);
 static void check_valid_buffer(const void* buffer, size_t size);
-
+static void file_lock_acquire();
+static void file_lock_release();
 
 void syscall_init(void) { 
     intr_register_int(0x30, 3, INTR_ON, syscall_handler, "syscall"); 
-    sema_init(&global,1);
+    lock_init(&global);
 }
 
 void syscall_exit(int status);
@@ -271,9 +272,11 @@ static bool syscall_remove(const char *file){
 }
 static int syscall_open(const char *file){
     struct file* ptr = NULL;
-    sema_down(&global);
+        file_lock_acquire();
+    // lock_aqcuire(&global);
     ptr = filesys_open(file);
-    sema_up(&global);
+    file_lock_release();
+    // lock_release(&global);
 
     if(ptr == NULL){ return -1; }
 
@@ -321,9 +324,11 @@ static int syscall_read(int fd, void* buffer, unsigned size){
     /* 从文件中读取 */
     int cur_read = 0;
     if(fd > 2){
-        sema_down(&global);
+        // lock_aqcuire(&global);
+            file_lock_acquire();
         cur_read = file_read(p->fdt.file_ptr[fd],buffer,size);
-        sema_up(&global);
+        // lock_release(&global);
+        file_lock_release();
         return cur_read;
     }
     /* 从标准输入读取 */
@@ -368,9 +373,9 @@ static int syscall_write(int fd, void* buffer, size_t size){
     if(fd > 2){
         struct process* p = thread_current()->pcb;
         if(p->fdt.using[fd] == false){ return -1; }
-        sema_down(&global);
+            file_lock_acquire();
         int ret = file_write(p->fdt.file_ptr[fd],buffer,size);
-        sema_up(&global);
+            file_lock_release();
         return ret;
     }
 }
@@ -378,9 +383,11 @@ static void syscall_seek(int fd,unsigned position){
     if(fd <= 2 || fd >= MAX_FD_NUM){ return; }
     struct process* p = thread_current()->pcb;
     if(p->fdt.using[fd] == false){ return ; }
-    sema_down(&global);
+    // lock_aqcuire(&global);
+    file_lock_acquire();
     file_seek(p->fdt.file_ptr[fd],position);
-    sema_up(&global);
+    // lock_release(&global);
+    file_lock_release();
 }
 static int syscall_tell(int fd){
     if(fd <= 2 || fd >= MAX_FD_NUM){
@@ -390,9 +397,9 @@ static int syscall_tell(int fd){
         if(p->fdt.using[fd] == false){
             return -1;
         }
-    sema_down(&global);
+        file_lock_acquire();
     int ret = file_tell(p->fdt.file_ptr[fd]);
-    sema_up(&global);
+        file_lock_release();
     return ret;
 }
 static void syscall_close(int fd){
@@ -401,9 +408,9 @@ static void syscall_close(int fd){
     }
     struct process* p = thread_current()->pcb;
     if(p->fdt.using[fd] == true){
-        sema_down(&global);
+            file_lock_acquire();
         file_close(p->fdt.file_ptr[fd]);
-        sema_up(&global);
+            file_lock_release();
         p->fdt.using[fd] = false;
         p->fdt.file_ptr[fd] = NULL;
     }
@@ -412,9 +419,6 @@ static pid_t syscall_fork(struct intr_frame* f){
     struct thread* t = thread_current();
     /* 保存父进程的寄存器状态，用于模拟中断 */
     t->pcb->saved_if = *f;
-    // pid_t pid;
-    // pid = process_fork();
-    // return pid;
     return process_fork();
 }
 static tid_t syscall_pt_create(stub_fun sfun, pthread_fun tfun, const void* arg){
@@ -446,4 +450,20 @@ static bool syscall_sema_down(sema_t* sema){
 }
 static tid_t syscall_get_tid(void){
     return thread_tid();
+}
+static void file_lock_acquire(void){
+    struct process* p = thread_current()->pcb;
+    enum intr_level old_level = intr_disable();
+    lock_acquire(&global);
+    p->file_lock = &global;
+    intr_set_level(old_level);
+}
+static void file_lock_release(void){
+    struct process* p = thread_current()->pcb;
+        enum intr_level old_level = intr_disable();
+
+    lock_release(p->file_lock);
+    p->file_lock = NULL;
+        intr_set_level(old_level);
+
 }

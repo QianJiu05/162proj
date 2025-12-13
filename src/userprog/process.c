@@ -60,11 +60,13 @@ void userprog_init(void) {
         t->pcb->in_parent = NULL;
         t->pcb->main_thread = t;
         t->pcb->pagedir = NULL;
+        t->pcb->file_lock = NULL;
         memset(&t->pcb->fdt,0,sizeof(t->pcb->fdt));
     }
     lock_init(&file_lock);
     lock_init(&user_sema_lock);
     lock_init(&pthread_lock);
+
     /* Kill the kernel if we did not succeed */
     ASSERT(success);
 }
@@ -215,6 +217,7 @@ static void start_process(void* _arg) {
       memset(&t->pcb->fdt,0,sizeof(t->pcb->fdt));
       memset(t->pcb->userlock,0,sizeof(lock_t*)*MAX_LOCK_NUM);
       memset(t->pcb->usersema,0,sizeof(lock_t*)*MAX_LOCK_NUM);
+      t->pcb->file_lock = NULL;
 
       t->tsb = calloc(1,sizeof( struct thread_status_block));
       t->tsb->tid = t->tid;
@@ -355,10 +358,13 @@ void process_exit(void) {
     struct process* pcb_to_free = cur->pcb;
     struct child_process* in_parent = pcb_to_free->in_parent;
 
+    if(pcb_to_free->file_lock != NULL ){
+        lock_release(pcb_to_free->file_lock);
+    }
     /* 清除fd */
     for(int i = 3; i < MAX_FD_NUM; i++){
-        if (cur->pcb->fdt.using[i] && cur->pcb->fdt.file_ptr[i] != NULL) {
-            file_close(cur->pcb->fdt.file_ptr[i]);
+        if (pcb_to_free->fdt.using[i] && pcb_to_free->fdt.file_ptr[i] != NULL) {
+            file_close(pcb_to_free->fdt.file_ptr[i]);
             // cur->pcb->fdt.using[i] = false;//这个有必要吗?
         }
     }
