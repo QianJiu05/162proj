@@ -33,8 +33,9 @@ static struct list all_list;
 static struct thread* idle_thread;
 
 /* Initial thread, the thread running init.c:main(). */
-static struct thread* initial_thread;
 
+struct thread* initial_thread;
+// static struct thread* initial_thread;
 /* Lock used by allocate_tid(). */
 static struct lock tid_lock;
 
@@ -572,7 +573,7 @@ static void schedule(void) {
   ASSERT(is_thread(next));
 
   if (cur != next)
-    prev = switch_threads(cur, next);
+    prev = switch_threads(cur, next);//这是汇编
   thread_switch_tail(prev);
 }
 

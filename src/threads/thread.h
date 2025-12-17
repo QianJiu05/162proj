@@ -75,6 +75,7 @@ typedef int tid_t;
       bool finished;              /* thread finish */
       struct semaphore join_sema;
       struct list_elem pcb_elem; /* 挂载到pcb的多线程列表 */
+      // bool pcb_exit;              /* proc已经退出 */
  };
 /* The `elem' member has a dual purpose.  It can be an element in
    the run queue (thread.c), or it can be an element in a

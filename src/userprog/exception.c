@@ -140,8 +140,8 @@ static void page_fault(struct intr_frame* f) {
    /* 用户程序导致page fault，返回exit-1并退出进程*/
    if(user){     
          f->eax = -1;
+         // printf("%s:exit\n",thread_current()->name);
          printf("%s: exit(%d)\n", thread_current()->pcb->process_name, -1);
-         // process_exit();
    }
    kill(f);
 }

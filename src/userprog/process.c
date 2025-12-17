@@ -29,7 +29,7 @@ static thread_func start_process NO_RETURN;
 static thread_func start_pthread NO_RETURN;
 bool load(struct pass_args* arg, void (**eip)(void), void** esp);
 bool setup_thread(void (**eip)(void), void** esp);
-
+extern initial_thread;
 struct lock file_lock;
 struct lock user_sema_lock;
 struct lock pthread_lock;
@@ -329,14 +329,73 @@ int process_wait(pid_t child_pid) {
 /* Free the current process's resources. */
 void process_exit(void) {
     struct thread* cur = thread_current();
-    // printf("[EXIT]process = %s,elf = %p\n",cur->pcb->process_name,cur->pcb->elf);
     uint32_t* pd;
 
     /* If this thread does not have a PCB, don't worry */
     if (cur->pcb == NULL) {
-      thread_exit();
-      NOT_REACHED();
+        thread_exit();
+        NOT_REACHED();
     }
+
+    /* 强制终止所有其他线程 */
+    if (!list_empty(&cur->pcb->multi_thread)) {
+        struct list_elem *e = list_begin(&cur->pcb->multi_thread);
+        
+        while (e != list_end(&cur->pcb->multi_thread)) {
+            struct thread_status_block* tsb = list_entry(e, struct thread_status_block, pcb_elem);
+            struct thread* t = tsb->th;
+            
+            e = list_next(e);
+            
+            /* 如果线程还活着，强制终止它 */
+            if (t != NULL && t != cur && t->status != THREAD_DYING) {
+                /* 标记线程为即将死亡 */
+                enum intr_level old_level = intr_disable();
+                
+                /* 从等待队列\就绪队列中移除 */
+                if (t->status == THREAD_BLOCKED || t->status == THREAD_READY) {
+                    list_remove(&t->elem);
+                }
+
+                // if(t->holding_lock != NULL){
+                //     lock_release(&t->holding_lock);
+                // }
+                
+                /* 标记为死亡状态 */
+                t->status = THREAD_DYING;
+                list_remove(&t->allelem);
+
+                /* 释放线程 */
+                if (t != initial_thread) {
+                    palloc_free_page(t);
+                }
+                
+                intr_set_level(old_level);
+            }
+        }
+        
+        /* 清理所有 TSB */
+        while (!list_empty(&cur->pcb->multi_thread)) {
+            e = list_pop_front(&cur->pcb->multi_thread);
+            struct thread_status_block* tsb = list_entry(e, struct thread_status_block, pcb_elem);
+            free(tsb);
+        }
+    }
+    /* 退出主线程 */
+    if(cur != cur->pcb->main_thread){
+        struct thread* main = cur->pcb->main_thread;
+        if (main->status == THREAD_BLOCKED || main->status == THREAD_READY) {
+            list_remove(&main->elem);
+        }
+        // if(main->holding_lock != NULL){
+        //     lock_release(&main->holding_lock);
+        // }
+        
+        /* 标记为死亡状态 */
+        main->status = THREAD_DYING;
+        list_remove(&main->allelem);
+    }
+
     
     /* Destroy the current process's page directory and switch back
       to the kernel-only page directory. */
@@ -348,7 +407,6 @@ void process_exit(void) {
         cur->pcb->pagedir = NULL;
         pagedir_activate(NULL);
         pagedir_destroy(pd);
-        // printf("[EXIT]i'm:%d,after destroy pd\n",cur->tid);
     }
 
     /* Free the PCB of this process and kill this thread
@@ -365,7 +423,6 @@ void process_exit(void) {
     for(int i = 3; i < MAX_FD_NUM; i++){
         if (pcb_to_free->fdt.using[i] && pcb_to_free->fdt.file_ptr[i] != NULL) {
             file_close(pcb_to_free->fdt.file_ptr[i]);
-            // cur->pcb->fdt.using[i] = false;//这个有必要吗?
         }
     }
     /* 如果不是fork的，要释放执行文件的写入权限 */
@@ -388,18 +445,29 @@ void process_exit(void) {
         if(in_parent->wait_by_parent)
             sema_up(&(in_parent->sema));
     }
-    /* 清理用户锁和sema.由于process_exit会由main_thread调用，此时pthread都已经退出
-       所以直接free即可 */
-    for(int i = 0; i < MAX_LOCK_NUM; i++){
-        if(pcb_to_free->userlock[i] != NULL){
+    /* 清理user lock & sema */
+    for(int i = 0; i < MAX_LOCK_NUM; i++) {
+        if(pcb_to_free->userlock[i] != NULL)
             free(pcb_to_free->userlock[i]);
-        }
-        if(pcb_to_free->usersema[i] != NULL){
+        
+        if(pcb_to_free->usersema[i] != NULL)
             free(pcb_to_free->usersema[i]);
-        }
     }
+
     
     free(pcb_to_free);
+
+    intr_disable();
+    // list_remove(&thread_current()->allelem);
+    // thread_current()->status = THREAD_DYING;
+    // list_remove(&cur->allelem);
+    // cur->status = THREAD_DYING;
+    // schedule();
+    // NOT_REACHED();
+    //     list_remove(&cur->elem);
+    // cur->status = THREAD_DYING;
+
+
     thread_exit();
 }
 
@@ -465,6 +533,7 @@ static void start_fork_process(struct child_process *chpcb){
     /* fork的进程没有elf */
     t->pcb->elf = NULL;
     list_init(&(t->pcb->child_list));
+    list_init(&(t->pcb->multi_thread));
 
     if (t->parent == NULL || t->parent->pcb == NULL) {
         goto fail;
@@ -1211,9 +1280,6 @@ void pthread_exit_main(void) {
     struct thread* t = thread_current();
     if(t != t->pcb->main_thread) return;
 
-    // if(t->tsb->been_joined == true){
-    //     sema_up(&t->tsb->join_sema);
-    // }
     t->tsb->finished = true;
 
     struct process* p = t->pcb;
@@ -1225,8 +1291,6 @@ void pthread_exit_main(void) {
 
         while(e != list_end(&p->multi_thread)){
             struct thread_status_block* tsb = list_entry(e, struct thread_status_block,pcb_elem);
-            /* 防护：主线程理论上不该发生在这个队列中 */
-            ASSERT(tsb->th != p->main_thread);
             
             /* 被join的不要处理 */
             if(tsb->been_joined == true) {
@@ -1253,7 +1317,6 @@ void pthread_exit_main(void) {
     }
     /* 主线程不需要释放stack，因为process_exit会释放 */
     syscall_exit(0);
-    // process_exit();
 }
 
 

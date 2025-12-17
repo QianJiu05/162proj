@@ -56,7 +56,7 @@ struct process {
    struct intr_frame saved_if;
 
    struct lock* file_lock;    /* 文件系统锁，获取时指向它，释放时NULL */
-   struct list multi_thread;  /* 用于挂载多线程 */
+   struct list multi_thread;  /* 用于挂载多线程tsb */
 
    struct lock* userlock[MAX_LOCK_NUM];
    struct semaphore* usersema[MAX_LOCK_NUM];
