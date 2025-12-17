@@ -36,6 +36,7 @@ struct lock pthread_lock;
 
 static bool copy_memory(uint32_t* parent,uint32_t* child);
 static void start_fork_process(struct child_process *chpcb);
+static void release_holding_lock(struct list* list);
 
 /* 通过确保主线程拥有最小的程序控制块 (PCB) 来初始化系统中的用户程序，
    以便它能够执行并等待第一个用户进程。如果主线程需要这些成员，
@@ -70,8 +71,7 @@ void userprog_init(void) {
     /* Kill the kernel if we did not succeed */
     ASSERT(success);
 }
-static struct pass_args* init_arg(struct pass_args *arg)
-{
+static struct pass_args* init_arg(struct pass_args *arg) {
     arg->argc = 0;
     for(int i = 0; i < MAX_ARGC; i++){
         arg->argv[i] = NULL;
@@ -138,7 +138,6 @@ pid_t process_execute(const char* file_name) {
     int16_t fn_len = get_fn_len(file_name);
 
     char* file_path = malloc(sizeof(char)*(fn_len+1));
-    // char file_path[fn_len+1];
     copy_fn_to_fp(file_name,file_path,fn_len);
 
     /* 此时还在父进程中 */
@@ -174,8 +173,7 @@ pid_t process_execute(const char* file_name) {
     free(proc_arg);
     free(file_path);
 
-    // printf("[EXEC]wake up from child exec,i'm:%s,child = %d\n",t->pcb->process_name,child->pid);
-    if(child->create_success == false){
+    if (child->create_success == false) {
         list_remove(&child->elem);
         free(child);
         return TID_ERROR;
@@ -197,8 +195,7 @@ static void start_process(void* _arg) {
     bool success, pcb_success;
 
     /* Allocate process control block */
-    //如果用calloc直接清零就不用在后面memset了
-    struct process* new_pcb = malloc(sizeof(struct process));
+    struct process* new_pcb = calloc(1,sizeof(struct process));
     success = pcb_success = new_pcb != NULL;
 
     /* Initialize process control block */
@@ -214,9 +211,6 @@ static void start_process(void* _arg) {
 
       list_init(&(t->pcb->child_list));
       list_init(&t->pcb->multi_thread);
-      memset(&t->pcb->fdt,0,sizeof(t->pcb->fdt));
-      memset(t->pcb->userlock,0,sizeof(lock_t*)*MAX_LOCK_NUM);
-      memset(t->pcb->usersema,0,sizeof(lock_t*)*MAX_LOCK_NUM);
       t->pcb->file_lock = NULL;
 
       t->tsb = calloc(1,sizeof( struct thread_status_block));
@@ -226,11 +220,7 @@ static void start_process(void* _arg) {
       t->tsb->finished = false;
       sema_init(&t->tsb->join_sema,0);
 
-      // enum intr_level old_level = intr_disable();
-      // list_push_back(&t->pcb->multi_thread,&t->tsb->pcb_elem);
-      // intr_set_level(old_level);
-
-      if(proc_arg->child != NULL){
+      if (proc_arg->child != NULL) {
           t->pcb->in_parent = proc_arg->child;
           proc_arg->child->alive = true;
           proc_arg->child->create_success = true;
@@ -268,7 +258,6 @@ static void start_process(void* _arg) {
         }
         thread_exit();//这里没有释放pcb的pd。会造成内存泄漏嘛?-->process_exit?
     }
-//die here??? get max priority: list is mess
     sema_up(&proc_arg->child->sema);//加载成功也要释放信号量
 
     /* 通过模拟中断返回来启动用户进程，
@@ -290,13 +279,13 @@ int process_wait(pid_t child_pid) {
     struct list* child = &(t->pcb->child_list);
 
     /* 没有子进程 */
-    if(list_empty(child)){ return -1; }
+    if( list_empty(child) ){ return -1; }
     /* 遍历子进程list找pid */
     for(struct list_elem* e = list_begin(child); 
             e != list_end(child); e = list_next(e))
     {
         struct child_process *p = list_entry(e,struct child_process,elem);
-        if(child_pid == p->pid){
+        if (child_pid == p->pid) {
             /* 已经死了 */
             if(p->alive == false){
                 int status = p->exit_status;
@@ -307,14 +296,12 @@ int process_wait(pid_t child_pid) {
             }
 
             /* 已经被等待，立刻return-1 */
-            if(p->wait_by_parent == true){ return -1; }
+            if (p->wait_by_parent == true) { return -1; }
 
             /* 没死&没被等待，进入等待 */
             p->wait_by_parent = true;
-            // printf("[WAIT]i'm:%s,wait pid:%d,not dead enter sleep\n",t->pcb->process_name,child_pid);
             sema_down(&p->sema);//这里进入等待
 
-            // printf("[WAIT]wakeup from wait,i'm:%s\n",t->pcb->process_name);
             /* 醒来后，获取退出状态并清理 */
             int status = p->exit_status;
             list_remove(e);
@@ -357,9 +344,7 @@ void process_exit(void) {
                     list_remove(&t->elem);
                 }
 
-                // if(t->holding_lock != NULL){
-                //     lock_release(&t->holding_lock);
-                // }
+                release_holding_lock(&t->holding_lock);
                 
                 /* 标记为死亡状态 */
                 t->status = THREAD_DYING;
@@ -387,10 +372,8 @@ void process_exit(void) {
         if (main->status == THREAD_BLOCKED || main->status == THREAD_READY) {
             list_remove(&main->elem);
         }
-        // if(main->holding_lock != NULL){
-        //     lock_release(&main->holding_lock);
-        // }
-        
+        release_holding_lock(&main->holding_lock);
+
         /* 标记为死亡状态 */
         main->status = THREAD_DYING;
         list_remove(&main->allelem);
@@ -614,7 +597,6 @@ static bool copy_memory(uint32_t* parent,uint32_t* child){
         /* 该物理页不为空，要新申请一页然后memcpy */
         void* new = palloc_get_page(PAL_USER | PAL_ZERO);
         if(new == NULL){
-            // printf("get page failed\n");
             return false;
         }
         memcpy(new,vpage,PGSIZE);
@@ -623,11 +605,9 @@ static bool copy_memory(uint32_t* parent,uint32_t* child){
         
         if(pagedir_set_page(child,addr,new,writable) != true){
             palloc_free_page(new);
-            // printf("[COPY]failed\n");
             return false;
         }
     }
-    // printf("[COPY]true\n");
     return true;
 }
 
@@ -1417,4 +1397,13 @@ bool user_sema_down(sema_t* sema) {
     }
     sema_down(p->usersema[*sema]);
     return true;
+}
+
+/* ====================  helper ==================== */
+static void release_holding_lock(struct list* list){
+    while(!list_empty(list)) {
+        struct list_elem* e = list_pop_front(list);
+        struct lock* lock = list_entry(e,struct lock,elem);
+        lock_release(lock);
+    }
 }
