@@ -24,6 +24,8 @@ typedef int tid_t;
 #define PRI_MIN 0      /* Lowest priority. */
 #define PRI_DEFAULT 31 /* Default priority. */
 #define PRI_MAX 63     /* Highest priority. */
+ 
+#define BIG_CONST 88761
 
 /* A kernel thread or user process.
 
@@ -75,8 +77,8 @@ typedef int tid_t;
       bool finished;              /* thread finish */
       struct semaphore join_sema;
       struct list_elem pcb_elem; /* 挂载到pcb的多线程列表 */
-      // bool pcb_exit;              /* proc已经退出 */
  };
+
 /* The `elem' member has a dual purpose.  It can be an element in
    the run queue (thread.c), or it can be an element in a
    semaphore wait list (synch.c).  It can be used these two ways
@@ -84,31 +86,35 @@ typedef int tid_t;
    ready state is on the run queue, whereas only a thread in the
    blocked state is on a semaphore wait list. */
 struct thread {
-  /* Owned by thread.c. */
-  tid_t tid;                 /* Thread identifier. */
-  enum thread_status status; /* Thread state. */
-  char name[16];             /* Name (for debugging purposes). */
-  uint8_t* stack;            /* Saved stack pointer. */
-  int priority;              /* Priority. */
-  int origin_priority;       /* Origin Priority */
-  struct list_elem allelem;  /* List element for all threads list. */
+    /* Owned by thread.c. */
+    tid_t tid;                 /* Thread identifier. */
+    enum thread_status status; /* Thread state. */
+    char name[16];             /* Name (for debugging purposes). */
+    uint8_t* stack;            /* Saved stack pointer. */
+    int priority;              /* Priority. */
+    int origin_priority;       /* Origin Priority */
+    struct list_elem allelem;  /* List element for all threads list. */
 
-  /* Shared between thread.c and synch.c. */
-  struct list_elem elem; /* List element. */
-  struct lock* waiting_lock;  /* 正在等待的锁 */
-  struct list holding_lock;   /* 线程持有的锁 */
+    /* Shared between thread.c and synch.c. */
+    struct list_elem elem; /* List element. */
+    struct lock* waiting_lock;  /* 正在等待的锁 */
+    struct list holding_lock;   /* 线程持有的锁 */
 
-#ifdef USERPROG
-  /* Owned by process.c. */
-  struct process* pcb; /* Process control block if this thread is a userprog */
-  struct thread* parent; /* 通过父线程找到父进程 */
-  /* 用户线程才有pcb与多线程 */
-  uint8_t* user_stack;
-  struct thread_status_block* tsb;  
-#endif
+    /* fair schedule */
+    unsigned long vruntime;   /* 虚拟运行时间 */
+    uint16_t stride;          /* 步幅 */
 
-  /* Owned by thread.c. */
-  unsigned magic; /* Detects stack overflow. */
+  #ifdef USERPROG
+    /* Owned by process.c. */
+    struct process* pcb; /* Process control block if this thread is a userprog */
+    struct thread* parent; /* 通过父线程找到父进程 */
+    /* 用户线程才有pcb与多线程 */
+    uint8_t* user_stack;
+    struct thread_status_block* tsb;  
+  #endif
+
+    /* Owned by thread.c. */
+    unsigned magic; /* Detects stack overflow. */
 };
 
 /* Types of scheduler that the user can request the kernel

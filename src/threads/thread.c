@@ -14,6 +14,7 @@
 #ifdef USERPROG
 #include "userprog/process.h"
 #endif
+#include <limits.h>
 
 /* Random value for struct thread's `magic' member.
    Used to detect stack overflow.  See the big comment at the top
@@ -23,6 +24,7 @@
 /* List of processes in THREAD_READY state, that is, processes
    that are ready to run but not actually running. */
 static struct list fifo_ready_list;
+static struct list fair_ready_list;
 // static struct list prio_ready_list;
 
 /* List of all processes.  Processes are added to this list
@@ -74,6 +76,7 @@ static struct thread* thread_schedule_fair(void);
 static struct thread* thread_schedule_mlfqs(void);
 static struct thread* thread_schedule_reserved(void);
 
+static struct thread* get_min_vruntime(struct list* list);
 /* Determines which scheduler the kernel should use.
    Controlled by the kernel command-line options
     "-sched=fifo", "-sched=prio",
@@ -99,30 +102,25 @@ scheduler_func* scheduler_jump_table[8] = {thread_schedule_fifo,     thread_sche
   然后再尝试使用 thread_create() 创建任何线程。
   在此函数完成之前，调用 thread_current() 是不安全的。 */
 void thread_init(void) {
-  ASSERT(intr_get_level() == INTR_OFF);
+    ASSERT(intr_get_level() == INTR_OFF);
 
-  lock_init(&tid_lock);
-  switch(active_sched_policy){
-      case SCHED_FAIR:
-          break;
-      case SCHED_FIFO:
-      case SCHED_PRIO:
-      default:
-          list_init(&fifo_ready_list);
-  }
-  // if(active_sched_policy == SCHED_FIFO || active_sched_policy == SCHED_PRIO){
-  //     list_init(&fifo_ready_list);
-  // }
-  // else if(active_sched_policy == SCHED_PRIO){
-  //     list_init(&prio_ready_list);
-  // }
-  list_init(&all_list);
+    lock_init(&tid_lock);
+    switch(active_sched_policy){
+        case SCHED_FAIR:
+            list_init(&fair_ready_list);
+            break;
+        case SCHED_FIFO:
+        case SCHED_PRIO:
+        default:
+            list_init(&fifo_ready_list);
+    }
+    list_init(&all_list);
 
-  /* Set up a thread structure for the running thread. */
-  initial_thread = running_thread();
-  init_thread(initial_thread, "main", PRI_DEFAULT);
-  initial_thread->status = THREAD_RUNNING;
-  initial_thread->tid = allocate_tid();
+    /* Set up a thread structure for the running thread. */
+    initial_thread = running_thread();
+    init_thread(initial_thread, "main", PRI_DEFAULT);
+    initial_thread->status = THREAD_RUNNING;
+    initial_thread->tid = allocate_tid();
 }
 
 /* Starts preemptive thread scheduling by enabling interrupts.
@@ -212,9 +210,6 @@ tid_t thread_create(const char* name, int priority, thread_func* function, void*
 
   /* Add to run queue. */
   thread_unblock(t);
-
-  // printf("CREATE: %s (pri=%d), current=%s (pri=%d)\n", 
-  //      name, t->priority, thread_current()->name, thread_current()->priority);
        
   /* 如果新建的优先级高于当前优先级，立即抢占 */
   if(t->priority > thread_current()->priority){
@@ -249,12 +244,15 @@ static void thread_enqueue(struct thread* t) {
   ASSERT(is_thread(t));
 
   /* prio可以直接复用fifo的list，因为插入时是不需要有序的 */
-  if (active_sched_policy == SCHED_FIFO || active_sched_policy == SCHED_PRIO || active_sched_policy == SCHED_FAIR){
+  if (active_sched_policy == SCHED_FIFO || active_sched_policy == SCHED_PRIO ){
       list_push_back(&fifo_ready_list, &t->elem);
   }
   // else if(active_sched_policy == SCHED_PRIO){
   //     list_insert_ordered(&prio_ready_list,&t->elem,priority_compare,NULL);
   // }
+  else if (active_sched_policy == SCHED_FAIR) {
+      list_push_back(&fair_ready_list, &t->elem);
+  }
   else{
       PANIC("Unimplemented scheduling policy value: %d", active_sched_policy);
   }
@@ -441,29 +439,38 @@ struct thread* running_thread(void) {
 /* Returns true if T appears to point to a valid thread. */
 static bool is_thread(struct thread* t) { return t != NULL && t->magic == THREAD_MAGIC; }
 
+// stride = (88761 << 18) / weight   // 精度 18 位
+static uint16_t get_stride(int priority) {
+    // if(priority <= 0){ priority = PRI_MIN; }
+    uint64_t temp =  (uint64_t)BIG_CONST << 18;
+    uint16_t stride = temp / (priority + 1);
+    return stride;
+}
 /* Does basic initialization of T as a blocked thread named
    NAME. */
 static void init_thread(struct thread* t, const char* name, int priority) {
-  enum intr_level old_level;
+    enum intr_level old_level;
 
-  ASSERT(t != NULL);
-  ASSERT(PRI_MIN <= priority && priority <= PRI_MAX);
-  ASSERT(name != NULL);
+    ASSERT(t != NULL);
+    ASSERT(PRI_MIN <= priority && priority <= PRI_MAX);
+    ASSERT(name != NULL);
 
-  memset(t, 0, sizeof *t);
-  t->status = THREAD_BLOCKED;
-  strlcpy(t->name, name, sizeof t->name);
-  t->stack = (uint8_t*)t + PGSIZE;
-  t->priority = priority;
-  t->origin_priority = priority;
-  t->pcb = NULL;
-  t->magic = THREAD_MAGIC;
-  t->waiting_lock = NULL;           /* ⭐ 添加初始化 */
-  list_init(&t->holding_lock);      /* ⭐ 添加初始化 */
+    memset(t, 0, sizeof *t);
+    t->status = THREAD_BLOCKED;
+    strlcpy(t->name, name, sizeof t->name);
+    t->stack = (uint8_t*)t + PGSIZE;
+    t->priority = priority;
+    t->origin_priority = priority;
+    t->pcb = NULL;
+    t->magic = THREAD_MAGIC;
+    list_init(&t->holding_lock); 
+    t->waiting_lock = NULL;      
+    t->vruntime = 0;
+    t->stride = get_stride(priority);
 
-  old_level = intr_disable();
-  list_push_back(&all_list, &t->allelem);
-  intr_set_level(old_level);
+    old_level = intr_disable();
+    list_push_back(&all_list, &t->allelem);
+    intr_set_level(old_level);
 }
 
 /* Allocates a SIZE-byte frame at the top of thread T's stack and
@@ -491,18 +498,18 @@ static struct thread* thread_schedule_prio(void) {
     if (!list_empty(&fifo_ready_list)){
         return get_max_priority(&fifo_ready_list);
     }
-    // return list_entry(list_pop_front(&prio_ready_list), struct thread, elem);
-  else
-    return idle_thread;
+    else
+      return idle_thread;
 }
 
 /* Fair priority scheduler */
 static struct thread* thread_schedule_fair(void) {
   // PANIC("Unimplemented scheduler policy: \"-sched=fair\"");
-  if(!list_empty(&fifo_ready_list)){
-      return list_entry(list_pop_front(&fifo_ready_list), struct thread, elem);
-  }  else
-    return idle_thread;
+  if(!list_empty(&fair_ready_list)){
+      return get_min_vruntime(&fair_ready_list);
+  }  
+  else
+      return idle_thread;
 }
 
 /* Multi-level feedback queue scheduler */
@@ -572,6 +579,8 @@ static void schedule(void) {
   ASSERT(cur->status != THREAD_RUNNING);
   ASSERT(is_thread(next));
 
+  cur->vruntime += cur->stride * (user_ticks + kernel_ticks);
+
   if (cur != next)
     prev = switch_threads(cur, next);//这是汇编
   thread_switch_tail(prev);
@@ -592,3 +601,25 @@ static tid_t allocate_tid(void) {
 /* Offset of `stack' member within `struct thread'.
    Used by switch.S, which can't figure it out on its own. */
 uint32_t thread_stack_ofs = offsetof(struct thread, stack);
+
+static struct thread* get_min_vruntime(struct list* list){
+    int min_time = ULONG_MAX ;
+    struct thread* min_thread = NULL;
+    struct list_elem* min_elem = NULL;
+
+    for(struct list_elem *e = list_begin(list); e != list_end(list); e = list_next(e)){
+        struct thread* t = list_entry(e,struct thread, elem);
+        if(t->vruntime < min_time){
+            min_thread = t;
+            min_elem = e;
+            min_time = t->vruntime;
+        }
+    }
+    if(min_elem != NULL)
+        list_remove(min_elem);
+        
+    if(min_time == ULONG_MAX)
+        printf("get min vruntime is ULONG_MAX!\n");
+    
+    return min_thread;
+}

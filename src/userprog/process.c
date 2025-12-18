@@ -200,31 +200,31 @@ static void start_process(void* _arg) {
 
     /* Initialize process control block */
     if (success) {
-      // Ensure that timer_interrupt() -> schedule() -> process_activate()
-      // does not try to activate our uninitialized pagedir
-      new_pcb->pagedir = NULL;
-      t->pcb = new_pcb;
+        // Ensure that timer_interrupt() -> schedule() -> process_activate()
+        // does not try to activate our uninitialized pagedir
+        new_pcb->pagedir = NULL;
+        t->pcb = new_pcb;
 
-      // Continue initializing the PCB as normal
-      t->pcb->main_thread = t;
-      strlcpy(t->pcb->process_name, t->name, sizeof t->name);
+        // Continue initializing the PCB as normal
+        t->pcb->main_thread = t;
+        strlcpy(t->pcb->process_name, t->name, sizeof t->name);
 
-      list_init(&(t->pcb->child_list));
-      list_init(&t->pcb->multi_thread);
-      t->pcb->file_lock = NULL;
+        list_init(&(t->pcb->child_list));
+        list_init(&t->pcb->multi_thread);
+        t->pcb->file_lock = NULL;
 
-      t->tsb = calloc(1,sizeof( struct thread_status_block));
-      t->tsb->tid = t->tid;
-      t->tsb->th = t;
-      t->tsb->been_joined = false;
-      t->tsb->finished = false;
-      sema_init(&t->tsb->join_sema,0);
+        t->tsb = calloc(1,sizeof( struct thread_status_block));
+        t->tsb->tid = t->tid;
+        t->tsb->th = t;
+        t->tsb->been_joined = false;
+        t->tsb->finished = false;
+        sema_init(&t->tsb->join_sema,0);
 
-      if (proc_arg->child != NULL) {
-          t->pcb->in_parent = proc_arg->child;
-          proc_arg->child->alive = true;
-          proc_arg->child->create_success = true;
-      }
+        if (proc_arg->child != NULL) {
+            t->pcb->in_parent = proc_arg->child;
+            proc_arg->child->alive = true;
+            proc_arg->child->create_success = true;
+        }
     }
 
     /* Initialize interrupt frame and load executable. */
@@ -275,7 +275,6 @@ static void start_process(void* _arg) {
  */
 int process_wait(pid_t child_pid) {
     struct thread* t = thread_current();
-    // printf("[WAIT]wait pid = %d\n",child_pid);
     struct list* child = &(t->pcb->child_list);
 
     /* 没有子进程 */
@@ -289,7 +288,6 @@ int process_wait(pid_t child_pid) {
             /* 已经死了 */
             if(p->alive == false){
                 int status = p->exit_status;
-                //把这个节点从链表中删除
                 list_remove(e);
                 free(p);
                 return status;
@@ -1170,12 +1168,12 @@ tid_t pthread_join(tid_t tid ) {
 
     enum intr_level old_level;
 
-    if(p->main_thread->tid == tid) {
+    if (p->main_thread->tid == tid) {
         tsb = p->main_thread->tsb;
         should_do_clean = false;
     } else {
 
-        /* ⭐ 修复：全程关中断保护查找和状态检查，防止竞态 */
+        /* 修复：全程关中断保护查找和状态检查，防止竞态 */
         old_level = intr_disable();
         for(struct list_elem* e = list_begin(&p->multi_thread);
           e != list_end(&p->multi_thread); e = list_next(e))
@@ -1186,7 +1184,6 @@ tid_t pthread_join(tid_t tid ) {
                 break;
             }
         }
-
 
     }
     intr_set_level(old_level);
@@ -1214,7 +1211,6 @@ tid_t pthread_join(tid_t tid ) {
     /* 醒了之后清理这个block,用中断防止竞态
         main的tsb不能被clean，因为不在multi_list */
     if(should_do_clean) {
-        // enum intr_level old_level = intr_disable();
         list_remove(&tsb->pcb_elem);
         intr_set_level(old_level);
         free(tsb);
