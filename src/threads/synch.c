@@ -134,7 +134,6 @@ void sema_up(struct semaphore* sema) {
 
   if (!list_empty(&sema->waiters)){
     /* 要找最大优先级的唤醒 */
-    // printf("finding biggest\n");
     t = get_max_priority(&sema->waiters);
     /* 把waiter的首个线程就绪 */
     thread_unblock(t);

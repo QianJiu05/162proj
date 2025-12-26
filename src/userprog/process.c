@@ -1121,10 +1121,9 @@ static void start_pthread(void* exec_ ) {
     /* 把esp指向栈顶 */
     success = setup_thread(&if_.eip,&if_.esp);
     if(success){
-      /* 压栈，
-      [arg]
-      [tf]
-      [Ret Addr] <-esp 指向这里
+      /* 压栈，  [arg]
+                [tf]
+                [Ret Addr] <-esp 指向这里
       并且 eip 指向 sf */
       char* esp = (char*)if_.esp;
       esp -= 4; *(void**)esp = exec->arg;
