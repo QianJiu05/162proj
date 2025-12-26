@@ -21,9 +21,14 @@
    of thread.h for details. */
 #define THREAD_MAGIC 0xcd6abf4b
 
+struct prio_list_table{
+    uint64_t bit_map;
+    struct list prio_list[PRI_MAX];
+};
 /* List of processes in THREAD_READY state, that is, processes
    that are ready to run but not actually running. */
 static struct list fifo_ready_list;
+static struct prio_list_table prio_table;
 static struct list fair_ready_list;
 // static struct list prio_ready_list;
 
@@ -76,7 +81,11 @@ static struct thread* thread_schedule_fair(void);
 static struct thread* thread_schedule_mlfqs(void);
 static struct thread* thread_schedule_reserved(void);
 
+static void init_prio_table(struct prio_list_table* table);
+static bool push_prio_table(struct prio_list_table* table, struct thread* t);
+static struct thread* pop_prio_table(struct prio_list_table* table);
 static struct thread* get_min_vruntime(struct list* list);
+
 /* Determines which scheduler the kernel should use.
    Controlled by the kernel command-line options
     "-sched=fifo", "-sched=prio",
@@ -110,7 +119,12 @@ void thread_init(void) {
             // list_init(&fair_ready_list);
             break;
         case SCHED_FIFO:
+            list_init(&fifo_ready_list);
+            break;
         case SCHED_PRIO:
+            init_prio_table(&prio_table);
+            break;
+            
         default:
             list_init(&fifo_ready_list);
     }
@@ -246,15 +260,28 @@ static void thread_enqueue(struct thread* t) {
   ASSERT(intr_get_level() == INTR_OFF);
   ASSERT(is_thread(t));
 
+  switch (active_sched_policy){
+      case SCHED_FIFO:
+          list_push_back(&fifo_ready_list, &t->elem);
+          break;
+
+      case SCHED_PRIO:
+          push_prio_table(&prio_table, t);
+          break;
+
+      case SCHED_FAIR:
+      default:
+          PANIC("Unimplemented scheduling policy value: %d", active_sched_policy);
+  }
   /* prio可以直接复用fifo的list，因为插入时是不需要有序的 */
-  if (active_sched_policy == SCHED_FIFO || active_sched_policy == SCHED_PRIO ){
-      list_push_back(&fifo_ready_list, &t->elem);
-  // } else if (active_sched_policy == SCHED_FAIR) {
-  //     list_push_back(&fair_ready_list, &t->elem);
-  }
-  else{
-      PANIC("Unimplemented scheduling policy value: %d", active_sched_policy);
-  }
+  // if (active_sched_policy == SCHED_FIFO || active_sched_policy == SCHED_PRIO ){
+  //     list_push_back(&fifo_ready_list, &t->elem);
+  // // } else if (active_sched_policy == SCHED_FAIR) {
+  // //     list_push_back(&fair_ready_list, &t->elem);
+  // }
+  // else{
+  //     PANIC("Unimplemented scheduling policy value: %d", active_sched_policy);
+  // }
 }
 
 /* 将阻塞的线程 T 转换为就绪状态。
@@ -494,22 +521,24 @@ static struct thread* thread_schedule_fifo(void) {
 
 /* Strict priority scheduler */
 static struct thread* thread_schedule_prio(void) {
-    // if (!list_empty(&prio_ready_list))
-    if (!list_empty(&fifo_ready_list)){
-        return get_max_priority(&fifo_ready_list);
+    if(prio_table.bit_map != 0){
+      return pop_prio_table(&prio_table);
     }
+    // if (!list_empty(&fifo_ready_list)){
+    //     return get_max_priority(&fifo_ready_list);
+    // }
     else
       return idle_thread;
 }
 
 /* Fair priority scheduler */
 static struct thread* thread_schedule_fair(void) {
-  // PANIC("Unimplemented scheduler policy: \"-sched=fair\"");
-  if(!list_empty(&fair_ready_list)){
-      return get_min_vruntime(&fair_ready_list);
-  }  
-  else
-      return idle_thread;
+  PANIC("Unimplemented scheduler policy: \"-sched=fair\"");
+//   if(!list_empty(&fair_ready_list)){
+//       return get_min_vruntime(&fair_ready_list);
+//   }  
+//   else
+//       return idle_thread;
 }
 
 /* Multi-level feedback queue scheduler */
@@ -602,6 +631,43 @@ static tid_t allocate_tid(void) {
    Used by switch.S, which can't figure it out on its own. */
 uint32_t thread_stack_ofs = offsetof(struct thread, stack);
 
+/* prio schedule */
+static void init_prio_table(struct prio_list_table* table) {
+    for(int i = PRI_MIN; i < PRI_MAX; i++){
+        list_init(&table->prio_list[i]);
+    }
+    table->bit_map = 0;
+}
+static void set_bit(uint64_t* bitmap, int num){
+    *bitmap |= (1ULL << num);
+}
+static void clear_bit(uint64_t* bitmap, int num){
+    uint64_t mask = ~(1ULL << num);
+    *bitmap &= mask;
+}
+static bool push_prio_table(struct prio_list_table* table, struct thread* t) {
+    int prio = t->priority;
+    list_push_back(&table->prio_list[prio], &t->elem);
+    set_bit(&table->bit_map, prio);
+}
+static int get_highest_bit(uint64_t bitmap){
+    int clz = __builtin_clzll(bitmap);
+    return PRI_MAX - clz;
+}
+static struct thread* pop_prio_table(struct prio_list_table* table) {
+    int highbit = get_highest_bit(table->bit_map);
+    
+    struct list_elem *e = list_pop_front(&table->prio_list[highbit]);
+    struct thread* t = list_entry(e,struct thread, elem);
+
+    if (list_empty(&table->prio_list[highbit])) {
+        clear_bit(&table->bit_map,highbit);
+    }
+
+    return t;
+}
+
+/* CFS schedule */
 static struct thread* get_min_vruntime(struct list* list){
     unsigned long min_time = ULONG_MAX ;
     struct thread* min_thread = NULL;
