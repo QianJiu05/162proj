@@ -90,21 +90,19 @@ static void check_sector(struct block* block, block_sector_t sector) {
   }
 }
 
-/* Reads sector SECTOR from BLOCK into BUFFER, which must
-   have room for BLOCK_SECTOR_SIZE bytes.
-   Internally synchronizes accesses to block devices, so external
-   per-block device locking is unneeded. */
+/* 从 BLOCK 读取扇区 SECTOR 到 BUFFER，
+   BUFFER 必须有足够的空间容纳 BLOCK_SECTOR_SIZE 字节。
+   内部同步对块设备的访问，因此无需外部对每个块设备进行锁定。 */
 void block_read(struct block* block, block_sector_t sector, void* buffer) {
   check_sector(block, sector);
   block->ops->read(block->aux, sector, buffer);
   block->read_cnt++;
 }
 
-/* Write sector SECTOR to BLOCK from BUFFER, which must contain
-   BLOCK_SECTOR_SIZE bytes.  Returns after the block device has
-   acknowledged receiving the data.
-   Internally synchronizes accesses to block devices, so external
-   per-block device locking is unneeded. */
+/* 将缓冲区中的扇区 SECTOR 写入块，
+   该缓冲区必须包含BLOCK_SECTOR_SIZE 个字节。
+   在块设备确认收到数据后返回。
+   内部同步对块设备的访问，因此无需外部对每个块设备进行锁定。 */
 void block_write(struct block* block, block_sector_t sector, const void* buffer) {
   check_sector(block, sector);
   ASSERT(block->type != BLOCK_FOREIGN);

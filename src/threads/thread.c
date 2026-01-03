@@ -15,6 +15,7 @@
 #include "userprog/process.h"
 #endif
 #include <limits.h>
+#include <kernel/bitmap.h>
 
 /* Random value for struct thread's `magic' member.
    Used to detect stack overflow.  See the big comment at the top
@@ -638,24 +639,25 @@ static void init_prio_table(struct prio_list_table* table) {
     }
     table->bit_map = 0;
 }
-static void set_bit(uint64_t* bitmap, int num){
-    *bitmap |= (1ULL << num);
-}
-static void clear_bit(uint64_t* bitmap, int num){
-    uint64_t mask = ~(1ULL << num);
-    *bitmap &= mask;
-}
+// static void set_bit(uint64_t* bitmap, int num){
+//     *bitmap |= (1ULL << num);
+// }
+// static void clear_bit(uint64_t* bitmap, int num){
+//     uint64_t mask = ~(1ULL << num);
+//     *bitmap &= mask;
+// }
 static bool push_prio_table(struct prio_list_table* table, struct thread* t) {
     int prio = t->priority;
     list_push_back(&table->prio_list[prio], &t->elem);
     set_bit(&table->bit_map, prio);
 }
-static int get_highest_bit(uint64_t bitmap){
-    int clz = __builtin_clzll(bitmap);
-    return PRI_MAX - clz;
+static int get_highest_bit_prio(uint64_t bitmap){
+    // int clz = __builtin_clzll(bitmap);
+    int ret = get_highest_bit1(bitmap);
+    return PRI_MAX - ret;
 }
 static struct thread* pop_prio_table(struct prio_list_table* table) {
-    int highbit = get_highest_bit(table->bit_map);
+    int highbit = get_highest_bit_prio(table->bit_map);
     
     struct list_elem *e = list_pop_front(&table->prio_list[highbit]);
     struct thread* t = list_entry(e,struct thread, elem);

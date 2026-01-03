@@ -48,4 +48,8 @@ bool bitmap_write(const struct bitmap*, struct file*);
 /* Debugging. */
 void bitmap_dump(const struct bitmap*);
 
+void set_bit(uint64_t* bitmap, int num);
+void clear_bit(uint64_t* bitmap, int num);
+int get_highest_bit1(uint64_t bitmap);
+int get_lowest_bit0(uint64_t bitmap);
 #endif /* lib/kernel/bitmap.h */

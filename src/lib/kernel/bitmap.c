@@ -228,10 +228,8 @@ bool bitmap_all(const struct bitmap* b, size_t start, size_t cnt) {
 
 /* Finding set or unset bits. */
 
-/* Finds and returns the starting index of the first group of CNT
-   consecutive bits in B at or after START that are all set to
-   VALUE.
-   If there is no such group, returns BITMAP_ERROR. */
+/* 查找并返回 B 中从 START 开始或之后连续设置值为 VALUE 的第一组 CNT 位。
+   如果不存在这样的组，则返回 BITMAP_ERROR。 */
 size_t bitmap_scan(const struct bitmap* b, size_t start, size_t cnt, bool value) {
   ASSERT(b != NULL);
   ASSERT(start <= b->bit_cnt);
@@ -261,7 +259,7 @@ size_t bitmap_scan_and_flip(struct bitmap* b, size_t start, size_t cnt, bool val
 }
 
 /* File input and output. */
-
+/* 这段代码是用于位图文件的持久化，将位图保存到磁盘文件或从文件中恢复位图 */
 #ifdef FILESYS
 /* Returns the number of bytes needed to store B in a file. */
 size_t bitmap_file_size(const struct bitmap* b) { return byte_cnt(b->bit_cnt); }
@@ -290,3 +288,25 @@ bool bitmap_write(const struct bitmap* b, struct file* file) {
 
 /* Dumps the contents of B to the console as hexadecimal. */
 void bitmap_dump(const struct bitmap* b) { hex_dump(0, b->bits, byte_cnt(b->bit_cnt), false); }
+
+
+/* self use bitmaps */
+void set_bit(uint64_t* bitmap, int num){
+    *bitmap |= (1ULL << num);
+}
+void clear_bit(uint64_t* bitmap, int num){
+    uint64_t mask = ~(1ULL << num);
+    *bitmap &= mask;
+}
+int get_highest_bit1(uint64_t bitmap){
+    int clz = __builtin_clzll(bitmap);
+    return clz;
+  // return PRI_MAX - clz;
+}
+int get_lowest_bit0(uint64_t bitmap){
+    /* 返回的是从右边起连续0的个数，取反的话找的就是连续1的个数 */
+    uint64_t map = ~bitmap;
+    return __builtin_clzll(map);
+    // 1110011
+    // 0001100 -->连续两个0，free_idx刚好是2
+}

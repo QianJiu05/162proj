@@ -7,6 +7,10 @@
 #include "filesys/free-map.h"
 #include "threads/malloc.h"
 
+#include "threads/synch.h"
+#include <kernel/bitmap.h>
+#include <stdio.h>
+
 /* Identifies an inode. */
 #define INODE_MAGIC 0x494e4f44
 
@@ -37,10 +41,17 @@ struct inode {
 struct cache_inode {
     block_sector_t sector;
     uint8_t data[BLOCK_SECTOR_SIZE];
+    bool valid;         /* 区分是sector = 0还是空inode */
     bool dirty;
+    bool is_writing;
+    bool pinned;        /* 已经被占用了，在清理完会分配给占用的来源 */
     bool recent_used;
 };
-
+struct cache_inode_table {
+    struct cache_inode buffer[CACHE_INODE_NUM];
+    uint8_t clk_cnt;
+};
+#define CLK_CNT_ADD(x)    do{ x++; x %= CACHE_INODE_NUM; }while(0)
 
 /* Returns the block device sector that contains byte offset POS
    within INODE.
@@ -57,25 +68,80 @@ static block_sector_t byte_to_sector(const struct inode* inode, off_t pos) {
 /* List of open inodes, so that opening a single inode twice
    returns the same `struct inode'. */
 static struct list open_inodes;
-static struct cache_inode inode_buffer[CACHE_INODE_NUM];
-static uint8_t clk_cnt;
-#define CLK_CNT_ADD(x)    do{ x++; x%=CACHE_INODE_NUM; }while(0)
+static struct cache_inode_table cache_table;
 
-
-struct cache_inode* get_cache_inode(block_sector_t sector) {
-
-    CLK_CNT_ADD(clk_cnt);
-    
-    return inode;
+struct cache_inode* find_cache_inode(block_sector_t sector) {
+    for (int i = 0; i < CACHE_INODE_NUM; i++){
+        if (cache_table.buffer[i].sector == sector &&  cache_table.buffer[i].valid) {
+            return &(cache_table.buffer[i]);
+        }
+    }
+    return NULL;
 }
 
+void write_cache2_disk(struct cache_inode* cache) {
+    if (cache->dirty == false) { return ; }
+
+    cache->is_writing = true;
+    block_write(fs_device, cache->sector, (void*)(cache->data));
+    cache->is_writing = false;
+    cache->dirty = false;
+}
+
+struct cache_inode* get_cache_inode(block_sector_t sector) {
+    struct cache_inode* cache;
+
+    for (uint8_t i = CACHE_INODE_NUM * 2; i > 0; i--) {
+        cache = &cache_table.buffer[cache_table.clk_cnt];
+
+        /* 空inode，直接分配 */
+        if (cache->valid == false) {
+            cache->sector = sector;
+            cache->recent_used = true;
+            cache->valid = true;
+
+            return cache;
+        }
+
+        /* 最近没有使用，并且没有被pinned */
+        if (cache->recent_used == false && cache->pinned == false) 
+        {
+            if (cache->dirty) 
+                write_cache2_disk(cache);
+            
+            memset(cache, 0, sizeof(struct cache_inode));
+            cache->sector = sector;
+            cache->valid = true;
+            return cache;
+
+        } else {
+            cache->recent_used = false;
+        }
+        CLK_CNT_ADD(cache_table.clk_cnt);
+    }
+    printf("clk algorithm run failed!\n");
+    return NULL;
+}
+
+void write_all2_disk(void) {
+    for (int i = 0; i < CACHE_INODE_NUM; i++) {
+        write_cache2_disk(&cache_table.buffer[i]);
+    }
+}
+
+
 /* Initializes the inode module. */
-void inode_init(void) {  list_init(&open_inodes); }
+void inode_init(void) {  
+    list_init(&open_inodes); 
+    memset(&cache_table, 0, sizeof(struct cache_inode_table));
+}
 
 /* 使用 LENGTH 字节的数据初始化一个 inode，
    并将新 inode 写入文件系统设备上的 SECTOR 扇区。
    如果成功，则返回 true。
-   如果内存或磁盘分配失败，则返回 false。 */
+   如果内存或磁盘分配失败，则返回 false。
+   
+   就是说，建立一个inode信息(在内存中)，然后把这个信息写到disk里 */
 bool inode_create(block_sector_t sector, off_t length) {
   struct inode_disk* disk_inode = NULL;
   bool success = false;
@@ -178,9 +244,9 @@ void inode_remove(struct inode* inode) {
   inode->removed = true;
 }
 
-/* Reads SIZE bytes from INODE into BUFFER, starting at position OFFSET.
-   Returns the number of bytes actually read, which may be less
-   than SIZE if an error occurs or end of file is reached. */
+/* 从 INODE 读取 SIZE 个字节到 BUFFER，起始位置为 OFFSET。
+   返回实际读取的字节数，该值可能小于 SIZE，
+   如果发生错误或到达文件末尾。 */
 off_t inode_read_at(struct inode* inode, void* buffer_, off_t size, off_t offset) {
     uint8_t* buffer = buffer_;
     off_t bytes_read = 0;
@@ -188,107 +254,118 @@ off_t inode_read_at(struct inode* inode, void* buffer_, off_t size, off_t offset
     struct cache_inode* cache = NULL;
 
     while (size > 0) {
-      /* Disk sector to read, starting byte offset within sector. */
-      block_sector_t sector_idx = byte_to_sector(inode, offset);
-      int sector_ofs = offset % BLOCK_SECTOR_SIZE;
+        /* Disk sector to read, starting byte offset within sector. */
+        block_sector_t sector_idx = byte_to_sector(inode, offset);
+        int sector_ofs = offset % BLOCK_SECTOR_SIZE;
 
-      /* Bytes left in inode, bytes left in sector, lesser of the two. */
-      off_t inode_left = inode_length(inode) - offset;
-      int sector_left = BLOCK_SECTOR_SIZE - sector_ofs;
-      int min_left = inode_left < sector_left ? inode_left : sector_left;
+        /* Bytes left in inode, bytes left in sector, lesser of the two. */
+        off_t inode_left = inode_length(inode) - offset;
+        int sector_left = BLOCK_SECTOR_SIZE - sector_ofs;
+        int min_left = inode_left < sector_left ? inode_left : sector_left;
 
-      /* Number of bytes to actually copy out of this sector. */
-      int chunk_size = size < min_left ? size : min_left;
-      if (chunk_size <= 0)
-        break;
+        /* Number of bytes to actually copy out of this sector. */
+        int chunk_size = size < min_left ? size : min_left;
+        if (chunk_size <= 0)
+            break;
 
-      if (sector_ofs == 0 && chunk_size == BLOCK_SECTOR_SIZE) {
-        /* Read full sector directly into caller's buffer. */
-        block_read(fs_device, sector_idx, buffer + bytes_read);
-      } else {
-        /* Read sector into bounce buffer, then partially copy
-              into caller's buffer. */
+        /* 缓存命中判断:如果要读的inode已经在cache里了，那么不需要block_read */
+        cache = find_cache_inode(sector_idx);
+        if (cache != NULL) {
+            memcpy(buffer + bytes_read, cache->data + sector_ofs, chunk_size);
+            cache->recent_used = true;
+
+            size -= chunk_size;
+            offset += chunk_size;
+            bytes_read += chunk_size;
+            continue;
+        }
+
+        /* 缓存未命中: 获取一个空的inode
+            首先把硬盘数据读到cache_inode，然后再从cache_inode拷贝给buffer */
         cache = get_cache_inode(sector_idx);
-        block_read(fs_device, sector_idx, cache);
-        // if (bounce == NULL) {
-        //   bounce = malloc(BLOCK_SECTOR_SIZE);
-        //   if (bounce == NULL)
-        //     break;
-        // }
-        // block_read(fs_device, sector_idx, bounce);
-        // memcpy(buffer + bytes_read, bounce + sector_ofs, chunk_size);
-        memcpy(buffer + bytes_read, cache + sector_ofs, chunk_size);
-        
-      }
+        if (cache == NULL) { break; }
+        cache->pinned = true;
+        block_read(fs_device, sector_idx, cache->data);
+        memcpy(buffer + bytes_read, cache->data + sector_ofs, chunk_size);
 
-      /* Advance. */
-      size -= chunk_size;
-      offset += chunk_size;
-      bytes_read += chunk_size;
+        cache->recent_used = true;
+        cache->pinned = false;
+
+        size -= chunk_size;
+        offset += chunk_size;
+        bytes_read += chunk_size;
     }
-    // free(bounce);
 
     return bytes_read;
 }
 
-/* Writes SIZE bytes from BUFFER into INODE, starting at OFFSET.
-   Returns the number of bytes actually written, which may be
-   less than SIZE if end of file is reached or an error occurs.
-   (Normally a write at end of file would extend the inode, but
-   growth is not yet implemented.) */
+/* 从缓冲区 (BUFFER) 向 inode 写入 SIZE 字节，起始位置为 OFFSET。
+   返回实际写入的字节数，该值可能小于 SIZE，如果到达文件末尾或发生错误。
+  （通常情况下，写入文件末尾会扩展 inode，但目前尚未实现 inode 增长功能。） */
 off_t inode_write_at(struct inode* inode, const void* buffer_, off_t size, off_t offset) {
-  const uint8_t* buffer = buffer_;
-  off_t bytes_written = 0;
-  uint8_t* bounce = NULL;
+    const uint8_t* buffer = buffer_;
+    off_t bytes_written = 0;
+    struct cache_inode* cache = NULL;
 
-  if (inode->deny_write_cnt)
-    return 0;
+    if (inode->deny_write_cnt)
+        return 0;
 
-  while (size > 0) {
-    /* Sector to write, starting byte offset within sector. */
-    block_sector_t sector_idx = byte_to_sector(inode, offset);
-    int sector_ofs = offset % BLOCK_SECTOR_SIZE;
+    while (size > 0) {
+        /* Sector to write, starting byte offset within sector. */
+        block_sector_t sector_idx = byte_to_sector(inode, offset);
+        int sector_ofs = offset % BLOCK_SECTOR_SIZE;
 
-    /* Bytes left in inode, bytes left in sector, lesser of the two. */
-    off_t inode_left = inode_length(inode) - offset;
-    int sector_left = BLOCK_SECTOR_SIZE - sector_ofs;
-    int min_left = inode_left < sector_left ? inode_left : sector_left;
+        /* Bytes left in inode, bytes left in sector, lesser of the two. */
+        off_t inode_left = inode_length(inode) - offset;
+        int sector_left = BLOCK_SECTOR_SIZE - sector_ofs;
+        int min_left = inode_left < sector_left ? inode_left : sector_left;
 
-    /* Number of bytes to actually write into this sector. */
-    int chunk_size = size < min_left ? size : min_left;
-    if (chunk_size <= 0)
-      break;
-
-    if (sector_ofs == 0 && chunk_size == BLOCK_SECTOR_SIZE) {
-      /* Write full sector directly to disk. */
-      block_write(fs_device, sector_idx, buffer + bytes_written);
-    } else {
-      /* We need a bounce buffer. */
-      if (bounce == NULL) {
-        bounce = malloc(BLOCK_SECTOR_SIZE);
-        if (bounce == NULL)
+        /* Number of bytes to actually write into this sector. */
+        int chunk_size = size < min_left ? size : min_left;
+        if (chunk_size <= 0)
           break;
-      }
+        
+        cache = find_cache_inode(sector_idx);
+        /* 缓存命中 */
+        if (cache != NULL) {
+            cache->pinned = true;
+            memcpy(cache->data + sector_ofs, buffer + bytes_written, chunk_size);
+            cache->dirty = true;
+            cache->pinned = false;
 
-      /* If the sector contains data before or after the chunk
-             we're writing, then we need to read in the sector
-             first.  Otherwise we start with a sector of all zeros. */
-      if (sector_ofs > 0 || chunk_size < sector_left)
-        block_read(fs_device, sector_idx, bounce);
-      else
-        memset(bounce, 0, BLOCK_SECTOR_SIZE);
-      memcpy(bounce + sector_ofs, buffer + bytes_written, chunk_size);
-      block_write(fs_device, sector_idx, bounce);
+            size -= chunk_size;
+            offset += chunk_size;
+            bytes_written += chunk_size;
+            continue;
+        }
+        /* 缓存未命中，申请空的cache_inode来存数据 */
+        cache = get_cache_inode(sector_idx);
+        if (cache == NULL) { break; }//申请失败了
+        
+        cache->pinned = true;
+
+        if (sector_ofs == 0 && chunk_size == BLOCK_SECTOR_SIZE) {
+            memcpy(cache->data, buffer + bytes_written, chunk_size);
+        } else {
+          /* 如果扇区包含我们正在写入的数据块之前或之后的数据，那么我们需要先读取该扇区。
+              否则，我们将从一个全零扇区开始。
+              由于get_cache_inode时已经清零inode了，所以可以直接用*/
+            if (sector_ofs > 0 || chunk_size < sector_left) {
+                block_read(fs_device, sector_idx, cache->data);
+            }
+
+            memcpy(cache->data + sector_ofs, buffer + bytes_written, chunk_size);
+        }
+
+        cache->dirty = true;
+        cache->recent_used = true;
+        cache->pinned = false;
+
+        size -= chunk_size;
+        offset += chunk_size;
+        bytes_written += chunk_size;
     }
-
-    /* Advance. */
-    size -= chunk_size;
-    offset += chunk_size;
-    bytes_written += chunk_size;
-  }
-  free(bounce);
-
-  return bytes_written;
+    return bytes_written;
 }
 
 /* Disables writes to INODE.

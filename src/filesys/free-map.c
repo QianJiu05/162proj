@@ -17,11 +17,8 @@ void free_map_init(void) {
   bitmap_mark(free_map, ROOT_DIR_SECTOR);
 }
 
-/* Allocates CNT consecutive sectors from the free map and stores
-   the first into *SECTORP.
-   Returns true if successful, false if not enough consecutive
-   sectors were available or if the free_map file could not be
-   written. */
+/* 从空闲映射表中分配 CNT 个连续扇区，并将第一个扇区存储到 *SECTORP 中。
+   如果成功则返回 true，如果连续扇区不足或 free_map 文件无法写入则返回 false。 */
 bool free_map_allocate(size_t cnt, block_sector_t* sectorp) {
   block_sector_t sector = bitmap_scan_and_flip(free_map, 0, cnt, false);
   if (sector != BITMAP_ERROR && free_map_file != NULL && !bitmap_write(free_map, free_map_file)) {
