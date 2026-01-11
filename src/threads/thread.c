@@ -16,12 +16,15 @@
 #endif
 #include <limits.h>
 #include <kernel/bitmap.h>
+#include "filesys/inode.h"
 
 /* Random value for struct thread's `magic' member.
    Used to detect stack overflow.  See the big comment at the top
    of thread.h for details. */
 #define THREAD_MAGIC 0xcd6abf4b
 
+#define DISK_SYNC_TICK 3000
+static bool  disk_sync;
 struct prio_list_table{
     uint64_t bit_map;
     struct list prio_list[PRI_MAX];
@@ -58,7 +61,7 @@ struct kernel_thread_frame {
 static long long idle_ticks;   /* # of timer ticks spent idle. */
 static long long kernel_ticks; /* # of timer ticks in kernel threads. */
 static long long user_ticks;   /* # of timer ticks in user programs. */
-
+static uint16_t  disk_ticks;    
 /* Scheduling. */
 #define TIME_SLICE 4          /* # of timer ticks to give each thread. */
 static unsigned thread_ticks; /* # of timer ticks since last yield. */
@@ -168,6 +171,13 @@ void thread_tick(void) {
   else
     kernel_ticks++;
   
+  disk_ticks++;
+  //1s 100tick-> 30s 3000 tick
+  if(disk_ticks >= DISK_SYNC_TICK) {
+      disk_sync = true;
+      disk_ticks = 0;
+  }
+
   if (active_sched_policy == SCHED_FAIR && t != idle_thread) {
       t->vruntime += t->stride;
   }
@@ -407,15 +417,12 @@ int thread_get_recent_cpu(void) {
   return 0;
 }
 
-/* Idle thread.  Executes when no other thread is ready to run.
-
-   The idle thread is initially put on the ready list by
-   thread_start().  It will be scheduled once initially, at which
-   point it initializes idle_thread, "up"s the semaphore passed
-   to it to enable thread_start() to continue, and immediately
-   blocks.  After that, the idle thread never appears in the
-   ready list.  It is returned by next_thread_to_run() as a
-   special case when the ready list is empty. */
+/* 空闲线程。当没有其他线程准备运行时执行。
+空闲线程最初由 `thread_start()` 函数放入就绪列表。
+它最初会被调度一次，此时，它初始化 `idle_thread` 函数，
+将传递给它的信号量“up”起来，以使 `thread_start()` 函数能够继续执行，
+然后立即阻塞。此后，空闲线程将不再出现在就绪列表中。
+当就绪列表为空时，`next_thread_to_run()` 函数会将其作为特殊情况返回。 */
 static void idle(void* idle_started_ UNUSED) {
   struct semaphore* idle_started = idle_started_;
   idle_thread = thread_current();
@@ -426,15 +433,11 @@ static void idle(void* idle_started_ UNUSED) {
     intr_disable();
     thread_block();
 
-    /* Re-enable interrupts and wait for the next one.
 
-         The `sti' instruction disables interrupts until the
-         completion of the next instruction, so these two
-         instructions are executed atomically.  This atomicity is
-         important; otherwise, an interrupt could be handled
-         between re-enabling interrupts and waiting for the next
-         one to occur, wasting as much as one clock tick worth of
-         time.
+    /* 重新启用中断并等待下一个中断。`sti` 指令会禁用中断
+    直到下一条指令执行完毕，因此这两条指令是原子执行的。这种原子性非常重要；
+    否则，可能会在重新启用中断和等待下一个中断之间处理一个中断，
+    从而浪费多达一个时钟周期的时间。
 
          See [IA32-v2a] "HLT", [IA32-v2b] "STI", and [IA32-v3a]
          7.11.1 "HLT Instruction". */
@@ -611,6 +614,9 @@ static void schedule(void) {
 
   // cur->vruntime += cur->stride * thread_ticks;
 
+  if (disk_sync) {
+      write_all2_disk();
+  }
   if (cur != next)
     prev = switch_threads(cur, next);//这是汇编
   thread_switch_tail(prev);

@@ -8,7 +8,6 @@
 #include "threads/malloc.h"
 
 #include "threads/synch.h"
-#include <kernel/bitmap.h>
 #include <stdio.h>
 
 /* Identifies an inode. */
@@ -70,7 +69,7 @@ static block_sector_t byte_to_sector(const struct inode* inode, off_t pos) {
 static struct list open_inodes;
 static struct cache_inode_table cache_table;
 
-struct cache_inode* find_cache_inode(block_sector_t sector) {
+static struct cache_inode* find_cache_inode(block_sector_t sector) {
     for (int i = 0; i < CACHE_INODE_NUM; i++){
         if (cache_table.buffer[i].sector == sector &&  cache_table.buffer[i].valid) {
             return &(cache_table.buffer[i]);
@@ -79,8 +78,8 @@ struct cache_inode* find_cache_inode(block_sector_t sector) {
     return NULL;
 }
 
-void write_cache2_disk(struct cache_inode* cache) {
-    if (cache->dirty == false) { return ; }
+static void write_cache2_disk(struct cache_inode* cache) {
+    if (cache->dirty == false || cache->is_writing) { return ; }
 
     cache->is_writing = true;
     block_write(fs_device, cache->sector, (void*)(cache->data));
@@ -88,7 +87,7 @@ void write_cache2_disk(struct cache_inode* cache) {
     cache->dirty = false;
 }
 
-struct cache_inode* get_cache_inode(block_sector_t sector) {
+static struct cache_inode* get_cache_inode(block_sector_t sector) {
     struct cache_inode* cache;
 
     for (uint8_t i = CACHE_INODE_NUM * 2; i > 0; i--) {
@@ -97,7 +96,6 @@ struct cache_inode* get_cache_inode(block_sector_t sector) {
         /* 空inode，直接分配 */
         if (cache->valid == false) {
             cache->sector = sector;
-            cache->recent_used = true;
             cache->valid = true;
 
             return cache;
@@ -271,8 +269,10 @@ off_t inode_read_at(struct inode* inode, void* buffer_, off_t size, off_t offset
         /* 缓存命中判断:如果要读的inode已经在cache里了，那么不需要block_read */
         cache = find_cache_inode(sector_idx);
         if (cache != NULL) {
+            cache->pinned = true;
             memcpy(buffer + bytes_read, cache->data + sector_ofs, chunk_size);
             cache->recent_used = true;
+            cache->pinned = false;
 
             size -= chunk_size;
             offset += chunk_size;

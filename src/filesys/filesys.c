@@ -33,7 +33,6 @@ void filesys_init(bool format) {
 void filesys_done(void) {
     write_all2_disk();
     free_map_close(); 
-  
 }
 
 /* Creates a file named NAME with the given INITIAL_SIZE.
