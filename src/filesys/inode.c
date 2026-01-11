@@ -45,10 +45,12 @@ struct cache_inode {
     bool is_writing;
     bool pinned;        /* 已经被占用了，在清理完会分配给占用的来源 */
     bool recent_used;
+    // struct inode* inode;
 };
 struct cache_inode_table {
     struct cache_inode buffer[CACHE_INODE_NUM];
     uint8_t clk_cnt;
+    struct lock* table_lock;
 };
 #define CLK_CNT_ADD(x)    do{ x++; x %= CACHE_INODE_NUM; }while(0)
 
@@ -175,31 +177,45 @@ bool inode_create(block_sector_t sector, off_t length) {
    and returns a `struct inode' that contains it.
    Returns a null pointer if memory allocation fails. */
 struct inode* inode_open(block_sector_t sector) {
-  struct list_elem* e;
-  struct inode* inode;
+    struct list_elem* e;
+    struct inode* inode;
+    struct cache_inode* cache;
 
-  /* Check whether this inode is already open. */
-  for (e = list_begin(&open_inodes); e != list_end(&open_inodes); e = list_next(e)) {
-    inode = list_entry(e, struct inode, elem);
-    if (inode->sector == sector) {
-      inode_reopen(inode);
-      return inode;
+    /* Check whether this inode is already open. */
+    for (e = list_begin(&open_inodes); e != list_end(&open_inodes); e = list_next(e)) {
+      inode = list_entry(e, struct inode, elem);
+      if (inode->sector == sector) {
+        inode_reopen(inode);
+        return inode;
+      }
     }
-  }
 
-  /* Allocate memory. */
-  inode = malloc(sizeof *inode);
-  if (inode == NULL)
-    return NULL;
+    /* Allocate memory. */
+    cache = get_cache_inode(sector);
+    if (cache == NULL)
+        return NULL;
 
-  /* Initialize. */
-  list_push_front(&open_inodes, &inode->elem);
-  inode->sector = sector;
-  inode->open_cnt = 1;
-  inode->deny_write_cnt = 0;
-  inode->removed = false;
-  block_read(fs_device, inode->sector, &inode->data);
-  return inode;
+    cache->pinned = true;
+
+    inode = malloc(sizeof(struct inode));
+    if (inode == NULL) {
+        cache->pinned = false;
+        return NULL;
+    }
+
+    /* Initialize. */
+    list_push_front(&open_inodes, &inode->elem);
+    inode->sector = sector;
+    inode->open_cnt = 1;
+    inode->deny_write_cnt = 0;
+    inode->removed = false;
+    
+    block_read(fs_device, inode->sector, cache->data);
+
+    memcpy(&inode->data,cache->data,BLOCK_SECTOR_SIZE);
+    cache->recent_used = true;
+    cache->pinned = false;
+    return inode;
 }
 
 /* Reopens and returns INODE. */

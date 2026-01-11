@@ -434,20 +434,10 @@ void process_exit(void) {
         if(pcb_to_free->usersema[i] != NULL)
             free(pcb_to_free->usersema[i]);
     }
-
     
     free(pcb_to_free);
 
     intr_disable();
-    // list_remove(&thread_current()->allelem);
-    // thread_current()->status = THREAD_DYING;
-    // list_remove(&cur->allelem);
-    // cur->status = THREAD_DYING;
-    // schedule();
-    // NOT_REACHED();
-    //     list_remove(&cur->elem);
-    // cur->status = THREAD_DYING;
-
 
     thread_exit();
 }

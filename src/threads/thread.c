@@ -617,6 +617,7 @@ static void schedule(void) {
   if (disk_sync) {
       write_all2_disk();
   }
+  
   if (cur != next)
     prev = switch_threads(cur, next);//这是汇编
   thread_switch_tail(prev);

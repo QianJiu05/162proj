@@ -17,7 +17,6 @@ struct file* file_open(struct inode* inode) {
     struct file* file = calloc(1, sizeof *file);
     if (inode != NULL && file != NULL) {
         file->inode = inode;
-        // file->user++;
         file->user = 1;
         file->deny_write = false;
         return file;

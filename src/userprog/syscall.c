@@ -272,11 +272,9 @@ static bool syscall_remove(const char *file){
 }
 static int syscall_open(const char *file){
     struct file* ptr = NULL;
-        file_lock_acquire();
-    // lock_aqcuire(&global);
+    file_lock_acquire();
     ptr = filesys_open(file);
     file_lock_release();
-    // lock_release(&global);
 
     if(ptr == NULL){ return -1; }
 
@@ -324,10 +322,8 @@ static int syscall_read(int fd, void* buffer, unsigned size){
     /* 从文件中读取 */
     int cur_read = 0;
     if(fd > 2){
-        // lock_aqcuire(&global);
             file_lock_acquire();
         cur_read = file_read(p->fdt.file_ptr[fd],buffer,size);
-        // lock_release(&global);
         file_lock_release();
         return cur_read;
     }
@@ -383,10 +379,8 @@ static void syscall_seek(int fd,unsigned position){
     if(fd <= 2 || fd >= MAX_FD_NUM){ return; }
     struct process* p = thread_current()->pcb;
     if(p->fdt.using[fd] == false){ return ; }
-    // lock_aqcuire(&global);
     file_lock_acquire();
     file_seek(p->fdt.file_ptr[fd],position);
-    // lock_release(&global);
     file_lock_release();
 }
 static int syscall_tell(int fd){
