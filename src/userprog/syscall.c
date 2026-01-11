@@ -18,8 +18,7 @@ static void syscall_handler(struct intr_frame*);
 static void check_valid_num(uint32_t* args);
 static void check_valid_str(const char* str);
 static void check_valid_buffer(const void* buffer, size_t size);
-static void file_lock_acquire();
-static void file_lock_release();
+
 
 void syscall_init(void) { 
     intr_register_int(0x30, 3, INTR_ON, syscall_handler, "syscall"); 
@@ -272,9 +271,7 @@ static bool syscall_remove(const char *file){
 }
 static int syscall_open(const char *file){
     struct file* ptr = NULL;
-    file_lock_acquire();
     ptr = filesys_open(file);
-    file_lock_release();
 
     if(ptr == NULL){ return -1; }
 
@@ -322,9 +319,7 @@ static int syscall_read(int fd, void* buffer, unsigned size){
     /* 从文件中读取 */
     int cur_read = 0;
     if(fd > 2){
-            file_lock_acquire();
         cur_read = file_read(p->fdt.file_ptr[fd],buffer,size);
-        file_lock_release();
         return cur_read;
     }
     /* 从标准输入读取 */
@@ -369,9 +364,7 @@ static int syscall_write(int fd, void* buffer, size_t size){
     if(fd > 2){
         struct process* p = thread_current()->pcb;
         if(p->fdt.using[fd] == false){ return -1; }
-            file_lock_acquire();
         int ret = file_write(p->fdt.file_ptr[fd],buffer,size);
-            file_lock_release();
         return ret;
     }
 }
@@ -379,9 +372,7 @@ static void syscall_seek(int fd,unsigned position){
     if(fd <= 2 || fd >= MAX_FD_NUM){ return; }
     struct process* p = thread_current()->pcb;
     if(p->fdt.using[fd] == false){ return ; }
-    file_lock_acquire();
     file_seek(p->fdt.file_ptr[fd],position);
-    file_lock_release();
 }
 static int syscall_tell(int fd){
     if(fd <= 2 || fd >= MAX_FD_NUM){
@@ -391,9 +382,7 @@ static int syscall_tell(int fd){
         if(p->fdt.using[fd] == false){
             return -1;
         }
-        file_lock_acquire();
     int ret = file_tell(p->fdt.file_ptr[fd]);
-        file_lock_release();
     return ret;
 }
 static void syscall_close(int fd){
@@ -402,9 +391,7 @@ static void syscall_close(int fd){
     }
     struct process* p = thread_current()->pcb;
     if(p->fdt.using[fd] == true){
-            file_lock_acquire();
         file_close(p->fdt.file_ptr[fd]);
-            file_lock_release();
         p->fdt.using[fd] = false;
         p->fdt.file_ptr[fd] = NULL;
     }
@@ -444,20 +431,4 @@ static bool syscall_sema_down(sema_t* sema){
 }
 static tid_t syscall_get_tid(void){
     return thread_tid();
-}
-static void file_lock_acquire(void){
-    struct process* p = thread_current()->pcb;
-    enum intr_level old_level = intr_disable();
-    lock_acquire(&global);
-    p->file_lock = &global;
-    intr_set_level(old_level);
-}
-static void file_lock_release(void){
-    struct process* p = thread_current()->pcb;
-        enum intr_level old_level = intr_disable();
-
-    lock_release(p->file_lock);
-    p->file_lock = NULL;
-        intr_set_level(old_level);
-
 }
