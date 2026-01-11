@@ -7,6 +7,8 @@
 #include "filesys/free-map.h"
 #include "threads/malloc.h"
 
+#include "threads/thread.h"
+#include "threads/interrupt.h"
 #include "threads/synch.h"
 #include <stdio.h>
 
@@ -34,6 +36,8 @@ struct inode {
   bool removed;           /* True if deleted, false otherwise. */
   int deny_write_cnt;     /* 0: writes ok, >0: deny writes. */
   struct inode_disk data; /* Inode content. */
+  struct lock lock;
+  struct rw_lock rw_lock;
 };
 
 #define CACHE_INODE_NUM   64
@@ -202,6 +206,8 @@ struct inode* inode_open(block_sector_t sector) {
         cache->pinned = false;
         return NULL;
     }
+    lock_init(&inode->lock);
+    rw_lock_init(&inode->rw_lock);
 
     /* Initialize. */
     list_push_front(&open_inodes, &inode->elem);
@@ -267,6 +273,9 @@ off_t inode_read_at(struct inode* inode, void* buffer_, off_t size, off_t offset
     // uint8_t* bounce = NULL;
     struct cache_inode* cache = NULL;
 
+    // lock_acquire(&inode->lock);
+    rw_lock_acquire(&inode->rw_lock,1);
+
     while (size > 0) {
         /* Disk sector to read, starting byte offset within sector. */
         block_sector_t sector_idx = byte_to_sector(inode, offset);
@@ -312,6 +321,9 @@ off_t inode_read_at(struct inode* inode, void* buffer_, off_t size, off_t offset
         bytes_read += chunk_size;
     }
 
+    // lock_release(&inode->lock);
+    rw_lock_release(&inode->lock,1);
+
     return bytes_read;
 }
 
@@ -325,6 +337,9 @@ off_t inode_write_at(struct inode* inode, const void* buffer_, off_t size, off_t
 
     if (inode->deny_write_cnt)
         return 0;
+    
+    // lock_acquire(&inode->lock);
+    rw_lock_acquire(&inode->lock,0);
 
     while (size > 0) {
         /* Sector to write, starting byte offset within sector. */
@@ -381,6 +396,9 @@ off_t inode_write_at(struct inode* inode, const void* buffer_, off_t size, off_t
         offset += chunk_size;
         bytes_written += chunk_size;
     }
+
+    // lock_release(&inode->lock);
+    rw_lock_release(&inode->lock,0);
     return bytes_written;
 }
 

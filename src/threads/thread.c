@@ -495,6 +495,7 @@ static void init_thread(struct thread* t, const char* name, int priority) {
     t->pcb = NULL;
     t->magic = THREAD_MAGIC;
     list_init(&t->holding_lock); 
+    list_init(&t->file_lock);
     t->waiting_lock = NULL;      
     t->vruntime = 0;
     t->stride = get_stride(priority);
@@ -617,7 +618,7 @@ static void schedule(void) {
   if (disk_sync) {
       write_all2_disk();
   }
-  
+
   if (cur != next)
     prev = switch_threads(cur, next);//这是汇编
   thread_switch_tail(prev);

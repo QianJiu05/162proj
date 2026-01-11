@@ -211,6 +211,7 @@ static void start_process(void* _arg) {
 
         list_init(&(t->pcb->child_list));
         list_init(&t->pcb->multi_thread);
+        list_init(&t->pcb->file_lock_list);
         t->pcb->file_lock = NULL;
 
         t->tsb = calloc(1,sizeof( struct thread_status_block));
@@ -343,6 +344,7 @@ void process_exit(void) {
                 }
 
                 release_holding_lock(&t->holding_lock);
+                release_holding_lock(&t->file_lock);
                 
                 /* 标记为死亡状态 */
                 t->status = THREAD_DYING;
@@ -371,6 +373,7 @@ void process_exit(void) {
             list_remove(&main->elem);
         }
         release_holding_lock(&main->holding_lock);
+        release_holding_lock(&main->file_lock);
 
         /* 标记为死亡状态 */
         main->status = THREAD_DYING;
@@ -504,6 +507,7 @@ static void start_fork_process(struct child_process *chpcb){
     /* fork的进程没有elf */
     t->pcb->elf = NULL;
     list_init(&(t->pcb->child_list));
+    list_init(&(t->pcb->file_lock_list));
     list_init(&(t->pcb->multi_thread));
 
     if (t->parent == NULL || t->parent->pcb == NULL) {

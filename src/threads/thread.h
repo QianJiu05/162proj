@@ -98,6 +98,8 @@ struct thread {
     struct list_elem elem; /* List element. */
     struct lock* waiting_lock;  /* 正在等待的锁 */
     struct list holding_lock;   /* 线程持有的锁 */
+    
+    struct list file_lock;
 
     /* fair schedule */
     unsigned long vruntime;   /* 虚拟运行时间 */
