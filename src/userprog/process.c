@@ -32,7 +32,6 @@ bool setup_thread(void (**eip)(void), void** esp);
 extern initial_thread;
 struct lock file_lock;
 struct lock user_sema_lock;
-struct lock pthread_lock;
 
 static bool copy_memory(uint32_t* parent,uint32_t* child);
 static void start_fork_process(struct child_process *chpcb);
@@ -63,10 +62,10 @@ void userprog_init(void) {
         t->pcb->pagedir = NULL;
         t->pcb->file_lock = NULL;
         memset(&t->pcb->fdt,0,sizeof(t->pcb->fdt));
+        lock_init(&t->pcb->pthread_lock);
     }
     lock_init(&file_lock);
     lock_init(&user_sema_lock);
-    lock_init(&pthread_lock);
 
     /* Kill the kernel if we did not succeed */
     ASSERT(success);
@@ -211,7 +210,6 @@ static void start_process(void* _arg) {
 
         list_init(&(t->pcb->child_list));
         list_init(&t->pcb->multi_thread);
-        list_init(&t->pcb->file_lock_list);
         t->pcb->file_lock = NULL;
 
         t->tsb = calloc(1,sizeof( struct thread_status_block));
@@ -220,6 +218,7 @@ static void start_process(void* _arg) {
         t->tsb->been_joined = false;
         t->tsb->finished = false;
         sema_init(&t->tsb->join_sema,0);
+        lock_init(&t->pcb->pthread_lock);
 
         if (proc_arg->child != NULL) {
             t->pcb->in_parent = proc_arg->child;
@@ -473,7 +472,6 @@ pid_t process_fork(void){
 
     /* 让父进程进入等待，创建子进程后唤醒父进程，
         不论是否成功，然后初始化child_PCB并返回tid */
-    // printf("[FORK]enter sleep,wait for child init\n");
     sema_down(&child->sema);
     //这里醒了，然后判断是不是true
     // printf("[FORK]wake up from child:%d\n",child->pid);
@@ -507,8 +505,8 @@ static void start_fork_process(struct child_process *chpcb){
     /* fork的进程没有elf */
     t->pcb->elf = NULL;
     list_init(&(t->pcb->child_list));
-    list_init(&(t->pcb->file_lock_list));
     list_init(&(t->pcb->multi_thread));
+    lock_init(&t->pcb->pthread_lock);
 
     if (t->parent == NULL || t->parent->pcb == NULL) {
         goto fail;
@@ -1023,17 +1021,18 @@ bool setup_thread(void (**eip)(void) , void** esp ) {
     uint8_t* stack_addr;
     bool success = false;
 
+    struct process* p = thread_current()->pcb;
     /* 申请一块地址，把这个地址install到合适的位置 */
     kpage = palloc_get_page(PAL_USER | PAL_ZERO);
     if (kpage != NULL) {
-        lock_acquire(&pthread_lock);
+        lock_acquire(&p->pthread_lock);
 
         stack_addr = find_stack_addr();
 
         if(stack_addr == NULL){
             printf("get empty stackaddr\n");
             palloc_free_page(kpage);
-            lock_release(&pthread_lock);
+            lock_release(&p->pthread_lock);
             return success;
         }
         
@@ -1045,7 +1044,7 @@ bool setup_thread(void (**eip)(void) , void** esp ) {
         else
             palloc_free_page(kpage);
 
-        lock_release(&pthread_lock);
+        lock_release(&p->pthread_lock);
     }
     return success;
 }

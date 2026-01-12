@@ -47,18 +47,22 @@ struct process {
    char process_name[16];      /* Name of the main thread */
    struct thread* main_thread; /* Pointer to main thread */
 
+   /* 文件 */
    struct file_descript_table fdt;    /* 文件描述符 */
+   struct file* elf;          /* 可执行文件的指针，用于退出时关闭 */
 
+   /* 子进程 */
    struct list child_list;     /* 子进程pid链表 */
    struct child_process* in_parent;  /* 自己在父进程的节点 */
 
-   struct file* elf;          /* 可执行文件的指针，用于退出时关闭 */
    struct intr_frame saved_if;
 
    struct lock* file_lock;    /* 文件系统锁，获取时指向它，释放时NULL */
-   struct list file_lock_list;
+   /* 多线程 */
    struct list multi_thread;  /* 用于挂载多线程tsb */
 
+   /* 用户态同步量 */
+   struct lock pthread_lock;
    struct lock* userlock[MAX_LOCK_NUM];
    struct semaphore* usersema[MAX_LOCK_NUM];
 
