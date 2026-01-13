@@ -15,6 +15,7 @@
 /* Identifies an inode. */
 #define INODE_MAGIC 0x494e4f44
 
+#define 
 /* On-disk inode.
    Must be exactly BLOCK_SECTOR_SIZE bytes long. */
 struct inode_disk {
@@ -36,8 +37,10 @@ struct inode {
   bool removed;           /* True if deleted, false otherwise. */
   int deny_write_cnt;     /* 0: writes ok, >0: deny writes. */
   struct inode_disk data; /* Inode content. */
-  struct lock lock;
   struct rw_lock rw_lock;
+
+  struct inode* direct_ptr;
+  struct inode* indirect_ptr;
 };
 
 #define CACHE_INODE_NUM   64
@@ -49,7 +52,6 @@ struct cache_inode {
     bool is_writing;
     bool pinned;        /* 已经被占用了，在清理完会分配给占用的来源 */
     bool recent_used;
-    // struct inode* inode;
 };
 struct cache_inode_table {
     struct cache_inode buffer[CACHE_INODE_NUM];
@@ -206,7 +208,6 @@ struct inode* inode_open(block_sector_t sector) {
         cache->pinned = false;
         return NULL;
     }
-    lock_init(&inode->lock);
     rw_lock_init(&inode->rw_lock);
 
     /* Initialize. */
@@ -322,7 +323,7 @@ off_t inode_read_at(struct inode* inode, void* buffer_, off_t size, off_t offset
     }
 
     // lock_release(&inode->lock);
-    rw_lock_release(&inode->lock,1);
+    rw_lock_release(&inode->rw_lock,1);
 
     return bytes_read;
 }
@@ -339,7 +340,7 @@ off_t inode_write_at(struct inode* inode, const void* buffer_, off_t size, off_t
         return 0;
     
     // lock_acquire(&inode->lock);
-    rw_lock_acquire(&inode->lock,0);
+    rw_lock_acquire(&inode->rw_lock,0);
 
     while (size > 0) {
         /* Sector to write, starting byte offset within sector. */
@@ -397,8 +398,7 @@ off_t inode_write_at(struct inode* inode, const void* buffer_, off_t size, off_t
         bytes_written += chunk_size;
     }
 
-    // lock_release(&inode->lock);
-    rw_lock_release(&inode->lock,0);
+    rw_lock_release(&inode->rw_lock,0);
     return bytes_written;
 }
 
