@@ -15,7 +15,6 @@
 /* Identifies an inode. */
 #define INODE_MAGIC 0x494e4f44
 
-#define 
 /* On-disk inode.
    Must be exactly BLOCK_SECTOR_SIZE bytes long. */
 struct inode_disk {
@@ -76,6 +75,8 @@ static block_sector_t byte_to_sector(const struct inode* inode, off_t pos) {
    returns the same `struct inode'. */
 static struct list open_inodes;
 static struct cache_inode_table cache_table;
+
+static struct lock open_inode_lock;
 
 static struct cache_inode* find_cache_inode(block_sector_t sector) {
     for (int i = 0; i < CACHE_INODE_NUM; i++){
@@ -140,6 +141,7 @@ void write_all2_disk(void) {
 void inode_init(void) {  
     list_init(&open_inodes); 
     memset(&cache_table, 0, sizeof(struct cache_inode_table));
+    lock_init(&open_inode_lock);
 }
 
 /* 使用 LENGTH 字节的数据初始化一个 inode，
@@ -183,6 +185,9 @@ bool inode_create(block_sector_t sector, off_t length) {
    and returns a `struct inode' that contains it.
    Returns a null pointer if memory allocation fails. */
 struct inode* inode_open(block_sector_t sector) {
+    /* 先获取锁，保证操作的原子性 */
+    lock_acquire(&open_inode_lock);
+
     struct list_elem* e;
     struct inode* inode;
     struct cache_inode* cache;
@@ -192,6 +197,7 @@ struct inode* inode_open(block_sector_t sector) {
       inode = list_entry(e, struct inode, elem);
       if (inode->sector == sector) {
         inode_reopen(inode);
+        lock_release(&open_inode_lock);
         return inode;
       }
     }
@@ -211,15 +217,18 @@ struct inode* inode_open(block_sector_t sector) {
     rw_lock_init(&inode->rw_lock);
 
     /* Initialize. */
-    list_push_front(&open_inodes, &inode->elem);
     inode->sector = sector;
     inode->open_cnt = 1;
     inode->deny_write_cnt = 0;
     inode->removed = false;
     
     block_read(fs_device, inode->sector, cache->data);
-
+    
     memcpy(&inode->data,cache->data,BLOCK_SECTOR_SIZE);
+    list_push_front(&open_inodes, &inode->elem);
+    
+    lock_release(&open_inode_lock);
+
     cache->recent_used = true;
     cache->pinned = false;
     return inode;
@@ -246,7 +255,9 @@ void inode_close(struct inode* inode) {
   /* Release resources if this was the last opener. */
   if (--inode->open_cnt == 0) {
     /* Remove from inode list and release lock. */
+    lock_acquire(&open_inode_lock);
     list_remove(&inode->elem);
+    lock_release(&open_inode_lock);
 
     /* Deallocate blocks if removed. */
     if (inode->removed) {
