@@ -11,17 +11,44 @@
 #include "threads/interrupt.h"
 #include "threads/synch.h"
 #include <stdio.h>
+#include <kernel/bitmap.h>
 
 /* Identifies an inode. */
 #define INODE_MAGIC 0x494e4f44
 
+#define FILESYS_SIZE (1<<23)
+#define NUM_OF_DIRECT 100
+#define NUM_OF_INDIRECT 10
+#define NUM_OF_DOUBLE_INDIR 2
+
 /* On-disk inode.
-   Must be exactly BLOCK_SECTOR_SIZE bytes long. */
+   Must be exactly BLOCK_SECTOR_SIZE bytes long. 
+   这个结构体存的是文件的元数据而不是文件的数据本身。
+
+*/
 struct inode_disk {
-  block_sector_t start; /* First data sector. */
-  off_t length;         /* File size in bytes. */
-  unsigned magic;       /* Magic number. */
-  uint32_t unused[125]; /* Not used. -->用来占位，让struct刚好占用一个SECTOR */
+    // block_sector_t start; /* First data sector. */
+    off_t length;         /* File size in bytes. */
+    unsigned magic;       /* Magic number. */
+
+    /* 直接指针 */
+    block_sector_t direct[NUM_OF_DIRECT];         /* 直接指针,指向存数据的sector */
+
+    /* 间接指针 */
+    block_sector_t indirect[NUM_OF_INDIRECT];        /* 间接指针，指向另一个direct块 */
+    block_sector_t double_indirect[NUM_OF_DOUBLE_INDIR];  /* 二级间接指针 */
+    // uint32_t unused[125]; /* Not used. -->用来占位，让struct刚好占用一个SECTOR */
+    uint32_t unused[14];//128-114=14
+};
+
+/* On-disk 间接指针,记录的是磁盘号,指向存储data的sector
+    512字节 / 4字节 = 128 指向128个扇区*/
+struct indirect_disk {
+    block_sector_t sector[128];
+};
+/* On-disk 双重间接指针，指向indirect_disk */
+struct double_indirect {
+    block_sector_t sector[128];
 };
 
 /* Returns the number of sectors to allocate for an inode SIZE
@@ -37,9 +64,6 @@ struct inode {
   int deny_write_cnt;     /* 0: writes ok, >0: deny writes. */
   struct inode_disk data; /* Inode content. */
   struct rw_lock rw_lock;
-
-  struct inode* direct_ptr;
-  struct inode* indirect_ptr;
 };
 
 #define CACHE_INODE_NUM   64
@@ -59,15 +83,28 @@ struct cache_inode_table {
 };
 #define CLK_CNT_ADD(x)    do{ x++; x %= CACHE_INODE_NUM; }while(0)
 
-/* Returns the block device sector that contains byte offset POS
-   within INODE.
-   Returns -1 if INODE does not contain data for a byte at offset
-   POS. */
+/* 返回包含 INODE 中字节偏移量 POS 的块设备扇区。
+    如果 INODE 中不存在偏移量为 POS 的字节数据，则返回 -1。
+*/
 static block_sector_t byte_to_sector(const struct inode* inode, off_t pos) {
-  ASSERT(inode != NULL);
-  if (pos < inode->data.length)
-    return inode->data.start + pos / BLOCK_SECTOR_SIZE;
-  else
+    ASSERT(inode != NULL);
+    
+    if (pos >= inode->data.length)
+        return -1;
+
+    uint32_t sector_idx = pos / BLOCK_SECTOR_SIZE;
+
+    if (sector_idx < NUM_OF_DIRECT) {
+        //直接区间
+        return sector_idx;
+    } else if (sector_idx < NUM_OF_DIRECT + NUM_OF_INDIRECT) {
+        //间接区间,读取扇区块获得扇区号
+
+    } else if (sector_idx < NUM_OF_DIRECT + NUM_OF_INDIRECT + NUM_OF_DOUBLE_INDIR) {
+        //双重间接区间
+    }
+
+    
     return -1;
 }
 
@@ -165,14 +202,14 @@ bool inode_create(block_sector_t sector, off_t length) {
     size_t sectors = bytes_to_sectors(length);
     disk_inode->length = length;
     disk_inode->magic = INODE_MAGIC;
-    if (free_map_allocate(sectors, &disk_inode->start)) {
+    if (free_map_allocate(sectors, disk_inode->direct)) {
       block_write(fs_device, sector, disk_inode);
       if (sectors > 0) {
         static char zeros[BLOCK_SECTOR_SIZE];
         size_t i;
 
         for (i = 0; i < sectors; i++)
-          block_write(fs_device, disk_inode->start + i, zeros);
+          block_write(fs_device, disk_inode->direct + i, zeros);
       }
       success = true;
     }
@@ -262,7 +299,7 @@ void inode_close(struct inode* inode) {
     /* Deallocate blocks if removed. */
     if (inode->removed) {
       free_map_release(inode->sector, 1);
-      free_map_release(inode->data.start, bytes_to_sectors(inode->data.length));
+      free_map_release(inode->data.direct, bytes_to_sectors(inode->data.length));
     }
 
     free(inode);
