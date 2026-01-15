@@ -36,20 +36,21 @@ struct inode_disk {
     block_sector_t direct[NUM_OF_DIRECT];         /* 直接指针,指向存数据的sector */
 
     /* 间接指针 */
-    block_sector_t indirect[NUM_OF_INDIRECT];        /* 间接指针，指向另一个direct块 */
-    block_sector_t double_indirect[NUM_OF_DOUBLE_INDIR];  /* 二级间接指针 */
+    block_sector_t indirect[NUM_OF_INDIRECT];        /* 间接指针，指向struct indirect_disk */
+    block_sector_t double_indirect[NUM_OF_DOUBLE_INDIR];  /* 二级间接指针, 指向struct double_indirect */
     // uint32_t unused[125]; /* Not used. -->用来占位，让struct刚好占用一个SECTOR */
     uint32_t unused[14];//128-114=14
 };
 
+#define INDIRECT_2_SECTOR_NUM   128
 /* On-disk 间接指针,记录的是磁盘号,指向存储data的sector
     512字节 / 4字节 = 128 指向128个扇区*/
 struct indirect_disk {
-    block_sector_t sector[128];
+    block_sector_t sector[INDIRECT_2_SECTOR_NUM];
 };
 /* On-disk 双重间接指针，指向indirect_disk */
 struct double_indirect {
-    block_sector_t sector[128];
+    block_sector_t sector[INDIRECT_2_SECTOR_NUM];
 };
 static char zeros[BLOCK_SECTOR_SIZE];
 
@@ -229,6 +230,26 @@ static bool disk_inode_allocate(uint32_t sectors, block_sector_t sector, struct 
 
     return success;
 }
+/* 用于分配一个间接块的指针指向的扇区 */
+static bool indirect_sector_allocate(uint16_t num, struct indirect_disk* indirect) {
+    bool success = false;
+    if (free_map_allocate(num, indirect->sector)) {
+        success = true;
+
+        block_sector_t start = indirect->sector[0];
+        for (int i = 1; i < num; i++) {
+            indirect->sector[i] = start + i;
+        }
+
+        if (num > 0) {
+            size_t i;
+                for (i = 0; i < num; i++)
+                    block_write(fs_device, indirect->sector[i], zeros);
+        }
+    }
+
+    return success;
+}
 /* parameter
     indirect_num : 要分配几块
     indirect_inode : 存储元数据
@@ -243,33 +264,32 @@ static bool indirect_inode_allocate(uint16_t indirect_num, struct inode_disk* di
     if (free_map_allocate(indirect_num, disk_inode->indirect)) {
         success = true;
 
-        /* 把分配的间接块的扇区写入disk_inode */
+        /* 把分配的间接块的扇区写入disk_inode,
+            block_write在外面写就不用多传一个sector */
         block_sector_t start = disk_inode->indirect[0];
         for (int i = 1; i < indirect_num; i++) {
             disk_inode->indirect[i] = start + i;
         }
-        // block_write(fs_device,)在外面写就不用多传一个sector
 
-        struct inode_disk* disk_inode_indir = calloc(1,sizeof(struct inode_disk));
-        if (disk_inode_indir == NULL) {
-            success = false;
-            return success;
-        }
-        disk_inode_indir->length = disk_inode->length;
-        disk_inode_indir->magic = INODE_MAGIC;
+        struct indirect_disk* indirect_inode = calloc(1, sizeof *indirect_inode);
 
         for (int i = 0; i < indirect_num; i++) {
-            disk_inode_allocate(128, disk_inode->indirect[i], disk_inode_indir);
+            /* 分配间接指针指向的128个sector，扇区号填入indirect_inode
+                把填入扇区号的结构体写入disk */
+            if (indirect_sector_allocate(INDIRECT_2_SECTOR_NUM, indirect_inode)) {
+                block_write(fs_device, disk_inode->indirect[i], indirect_inode);
+
+            }else {
+                success = false;
+            }
+
+            if (success == false) {
+                PANIC("indirect success = false\n");
+            }
         }
         success = true;
         
-        if (indirect_num > 0) {
-            size_t i;
-            for (i = 0; i < indirect_num; i++)
-                block_write(fs_device, disk_inode_indir->direct[i], zeros);
-        }
-        free(disk_inode_indir);
-
+        free(indirect_inode);
     } 
 
     return success;
