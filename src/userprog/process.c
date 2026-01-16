@@ -24,6 +24,7 @@
 
 #include "threads/pte.h"
 #include "filesys/file.h"
+#include "filesys/directory.h"
 
 static thread_func start_process NO_RETURN;
 static thread_func start_pthread NO_RETURN;
@@ -211,6 +212,7 @@ static void start_process(void* _arg) {
         list_init(&(t->pcb->child_list));
         list_init(&t->pcb->multi_thread);
         t->pcb->file_lock = NULL;
+        t->pcb->cwd = dir_open_root();
 
         t->tsb = calloc(1,sizeof( struct thread_status_block));
         t->tsb->tid = t->tid;
@@ -219,6 +221,9 @@ static void start_process(void* _arg) {
         t->tsb->finished = false;
         sema_init(&t->tsb->join_sema,0);
         lock_init(&t->pcb->pthread_lock);
+        
+
+
 
         if (proc_arg->child != NULL) {
             t->pcb->in_parent = proc_arg->child;
@@ -243,6 +248,9 @@ static void start_process(void* _arg) {
       // can try to activate the pagedir, but it is now freed memory
       struct process* pcb_to_free = t->pcb;
       t->pcb = NULL;
+      if (pcb_to_free->cwd != NULL) {
+        //   free(pcb_to_free->cwd);
+      }
       free(pcb_to_free);
     }
 
@@ -399,6 +407,7 @@ void process_exit(void) {
     struct process* pcb_to_free = cur->pcb;
     struct child_process* in_parent = pcb_to_free->in_parent;
 
+    // free(pcb_to_free->cwd);
     if(pcb_to_free->file_lock != NULL ){
         lock_release(pcb_to_free->file_lock);
     }
@@ -508,6 +517,8 @@ static void start_fork_process(struct child_process *chpcb){
     list_init(&(t->pcb->multi_thread));
     lock_init(&t->pcb->pthread_lock);
 
+    t->pcb->cwd = t->parent->pcb->cwd;
+
     if (t->parent == NULL || t->parent->pcb == NULL) {
         goto fail;
     }
@@ -569,6 +580,9 @@ fail:
         t->pcb = NULL;
         if(pcb_to_free->pagedir != NULL)
             pagedir_destroy(pcb_to_free->pagedir);
+        if (pcb_to_free->cwd) {
+            // free(pcb_to_free->cwd);应该是关闭目录
+        }
         free(pcb_to_free);
     }
     thread_exit();//这里没有释放pcb的pd。会造成内存泄漏嘛?-->process_exit?

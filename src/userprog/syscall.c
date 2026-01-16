@@ -11,8 +11,9 @@
 #include "filesys/filesys.h"
 #include "filesys/file.h"
 #include "devices/input.h"
+#include "filesys/inode.h"
+#include "filesys/free-map.h"
 
-struct lock global;
 static void syscall_handler(struct intr_frame*);
 
 static void check_valid_num(uint32_t* args);
@@ -22,7 +23,6 @@ static void check_valid_buffer(const void* buffer, size_t size);
 
 void syscall_init(void) { 
     intr_register_int(0x30, 3, INTR_ON, syscall_handler, "syscall"); 
-    lock_init(&global);
 }
 
 void syscall_exit(int status);
@@ -48,8 +48,8 @@ static bool syscall_sema_init(sema_t* sema, int val);
 static bool syscall_sema_up(sema_t* sema);
 static bool syscall_sema_down(sema_t* sema);
 static tid_t syscall_get_tid(void);
-
-
+static bool syscall_mkdir(const char* dir);
+static bool syscall_chdir(const char* dir);
 //arg[0]是调用号，其余是参数
 static void syscall_handler(struct intr_frame* f UNUSED) {
     //调用者的堆栈指针可以通过传递给它的 struct intr_frame 的 esp 成员访问。指针数组
@@ -178,6 +178,19 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
         case SYS_GET_TID:
             f->eax = syscall_get_tid();
             break;
+
+            
+        case SYS_CHDIR:
+            f->eax = syscall_chdir((char*)args[1]);
+            break;
+
+        case SYS_MKDIR:
+            f->eax = syscall_mkdir((char*)args[1]);
+            break;
+        case SYS_READDIR:
+        case SYS_ISDIR :
+        case SYS_INUMBER :
+            PANIC("syscall not imple2\n");
     }
 }
 
@@ -434,4 +447,40 @@ static bool syscall_sema_down(sema_t* sema){
 }
 static tid_t syscall_get_tid(void){
     return thread_tid();
+}
+static bool syscall_mkdir(const char* dir) {
+    /* 建立一个目录 */
+    block_sector_t sector;
+    bool success = false;
+    if (free_map_allocate(1, &sector)) {
+        success = dir_create(sector,16);
+    }
+    if (success) {
+        struct process* p = thread_current()->pcb;
+        /* 把目录写到父目录里 */
+        success = dir_add(p->cwd, dir, sector);
+    }
+    return success;
+
+}
+static bool syscall_chdir(const char* dir) {
+    struct inode* inode = NULL;
+    bool success = false;
+    /* 获取当前目录 */
+    struct process* p = thread_current()->pcb;
+
+    struct dir* cwd = p->cwd;
+
+    success = dir_lookup(cwd, dir, &inode);
+
+    if (success) {
+        struct dir* new = dir_open(inode);
+        if (new != NULL) {
+            p->cwd = new;
+        } else {
+            success = false;
+        }
+    }
+
+    return success;
 }

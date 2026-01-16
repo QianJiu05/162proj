@@ -88,10 +88,12 @@ static bool lookup(const struct dir* dir, const char* name, struct dir_entry* ep
   return false;
 }
 
-/* Searches DIR for a file with the given NAME
-   and returns true if one exists, false otherwise.
-   On success, sets *INODE to an inode for the file, otherwise to
-   a null pointer.  The caller must close *INODE. */
+/* 
+  在目录 DIR 中搜索具有给定名称的文件
+  如果存在则返回 true，否则返回 false。
+  成功时，将 *INODE 设置为该文件的 inode，否则设置为空指针。
+  调用者必须关闭 *INODE。 
+*/
 bool dir_lookup(const struct dir* dir, const char* name, struct inode** inode) {
   struct dir_entry e;
 
@@ -184,8 +186,8 @@ done:
   return success;
 }
 
-/* Reads the next directory entry in DIR and stores the name in
-   NAME.  Returns true if successful, false if the directory
+/* 读取目录 DIR 中的下一个条目，并将名称存储在NAME 中。 
+   Returns true if successful, false if the directory
    contains no more entries. */
 bool dir_readdir(struct dir* dir, char name[NAME_MAX + 1]) {
   struct dir_entry e;

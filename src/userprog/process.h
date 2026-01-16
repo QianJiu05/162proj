@@ -66,6 +66,8 @@ struct process {
    struct lock* userlock[MAX_LOCK_NUM];
    struct semaphore* usersema[MAX_LOCK_NUM];
 
+   /* directory */
+   struct dir* cwd;
 };
 
 struct pass_args{
