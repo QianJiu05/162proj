@@ -426,8 +426,20 @@ void inode_close(struct inode* inode) {
 
     /* Deallocate blocks if removed. */
     if (inode->removed) {
-      free_map_release(inode->sector, 1);
-      free_map_release(inode->data.direct, bytes_to_sectors(inode->data.length));
+        free_map_release(inode->sector, 1);
+        size_t num = bytes_to_sectors(inode->data.length);
+        if (num < NUM_OF_DIRECT) {
+            free_map_release(inode->data.direct[0], bytes_to_sectors(inode->data.length));
+
+        } else if (num < NUM_OF_DIRECT + 128 * NUM_OF_INDIRECT ) {
+            free_map_release(inode->data.direct[0], bytes_to_sectors(inode->data.length));
+            
+            size_t indir_num = DIV_ROUND_UP(num - NUM_OF_DIRECT,128);
+            free_map_release(inode->data.indirect[0], indir_num);
+
+        } else {
+          PANIC("free map not imple\n");
+        }
     }
 
     free(inode);

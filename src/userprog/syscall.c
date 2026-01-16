@@ -364,7 +364,7 @@ static int syscall_write(int fd, void* buffer, size_t size){
     if(fd > 2){
         struct process* p = thread_current()->pcb;
         if(p->fdt.using[fd] == false){ 
-            printf("fd error!\n");
+            // printf("fd error!\n");
             return -1; 
         }
         int ret = file_write(p->fdt.file_ptr[fd],buffer,size);
