@@ -92,7 +92,7 @@ static bool get_directory_and_target (char* path, struct dir** current, char* ch
   chdir :要create/open的 名字
 */
 static bool parse_path (const char* name, struct dir** current, char* chdir) {
-    if (name == NULL || name[0] == '\0') {
+    if (name == NULL) {
         return false;
     }
 
@@ -110,14 +110,15 @@ static bool parse_path (const char* name, struct dir** current, char* chdir) {
     while (*path_start == '/') {
         path_start++;
     }
-    /* 如果路径为空（只有 '/' 或空字符串） */
+    /* 如果路径为空（只有 '/' 或空字符串）
+        空名字也是支持的 */
     if (*path_start == '\0') {
-        free(copy);
-        dir_close(cwd);
-        return false;
+        *current = cwd;
+        strlcpy(chdir, "\0", 1);
+        return true;
     }
 
-    bool success = get_directory_and_target(copy, &cwd, chdir);
+    bool success = get_directory_and_target(path_start, &cwd, chdir);
 
     if (cwd != NULL) {
         *current = cwd;
@@ -159,8 +160,10 @@ struct file* filesys_open(const char* name) {
     // struct dir* dir = dir_open_root();
     struct dir* dir;
     char* file = malloc(NAME_MAX);
-    parse_path(name, &dir, file);
-    // struct dir* dir = get_start_dir(name);
+    if (!parse_path(name, &dir, file)) {
+        PANIC("file_path parse failed\n");
+    }
+    
     struct inode* inode = NULL;
 
     if (dir != NULL) {
