@@ -206,47 +206,43 @@ void inode_init(void) {
 */
 static bool disk_inode_allocate(uint32_t sectors, block_sector_t sector, struct inode_disk* disk_inode) {
     bool success = false;
-    if (free_map_allocate(sectors, disk_inode->direct)) {
 
-        success = true;
-        block_sector_t start = disk_inode->direct[0];
-
-        /* 把对应的扇区号写进数组 */
-        for (int i = 1; i < sectors; i++) {
-            disk_inode->direct[i] = start + i;
+    for (int i = 0; i < sectors; i++) {
+        if (free_map_allocate(1, &disk_inode->direct[i])) {
+            success = true;
+        } else {
+            success = false;
+            break;
         }
-        /* disk_inode的内容更新了把更新的信息写入磁盘 */
-        block_write(fs_device, sector, disk_inode);
-
-        if (sectors > 0) {
-            size_t i;
-            for (i = 0; i < sectors; i++)
-                block_write(fs_device, disk_inode->direct[i], zeros);
-        }
-    } else {
-        success = false;
+    }
+    /* disk_inode的内容更新了把更新的信息写入磁盘 */
+    block_write(fs_device, sector, disk_inode);
+    if (sectors > 0) {
+        size_t i;
+        for (i = 0; i < sectors; i++)
+            block_write(fs_device, disk_inode->direct[i], zeros);
     }
 
     return success;
 }
-/* 用于分配一个间接块的指针指向的扇区 */
+/* 用于分配一个间接块的指针指向的扇区
+    在本函数中不需要block_write indirect本身的扇区，调用者会自行写入 */
 static bool indirect_sector_allocate(uint16_t num, struct indirect_disk* indirect) {
     bool success = false;
-    if (free_map_allocate(num, indirect->sector)) {
-        success = true;
 
-        block_sector_t start = indirect->sector[0];
-        for (int i = 1; i < num; i++) {
-            indirect->sector[i] = start + i;
-        }
-
-        if (num > 0) {
-            size_t i;
-                for (i = 0; i < num; i++)
-                    block_write(fs_device, indirect->sector[i], zeros);
+    for (int i = 0; i < num; i++) {
+        if (free_map_allocate(1, &indirect->sector[i])) {
+            success = true;
+        }else {
+            success = false;
+            break;
         }
     }
-
+    if (num > 0) {
+        size_t i;
+        for (i = 0; i < num; i++)
+            block_write(fs_device, indirect->sector[i], zeros);
+    }
     return success;
 }
 /* parameter
@@ -310,38 +306,41 @@ bool inode_create(block_sector_t sector, off_t length) {
     ASSERT(sizeof *disk_inode == BLOCK_SECTOR_SIZE);
 
     disk_inode = calloc(1, sizeof *disk_inode);
-    if (disk_inode != NULL) {
-        size_t sectors = bytes_to_sectors(length);
-        disk_inode->length = length;
-        disk_inode->magic = INODE_MAGIC;
-        
-        if (sectors < NUM_OF_DIRECT) {
-            success = disk_inode_allocate(sectors,sector,disk_inode);
+    if (disk_inode == NULL) { return false; }
 
-        } else if (sectors < NUM_OF_DIRECT + NUM_OF_INDIRECT * 128){
-            //直接指针不够，还要加上间接指针
-            //1.先分配 NUM_OF_INDIRECT 个连续块
-            success = disk_inode_allocate(NUM_OF_DIRECT,sector,disk_inode);
-            if (success == false) { return success; }
-
-            //2.再计算要分配多少个间接块
-            uint16_t indirect_num = DIV_ROUND_UP(sectors - NUM_OF_DIRECT,128);
-
-            //3.分配间接块
-            success = indirect_inode_allocate(indirect_num, disk_inode);
-            
-            //4.把间接块的扇区号写入indirect数组
-            block_write(fs_device,sector,disk_inode);
-
-
-
-
-        } else {
-            PANIC("NOT　IMPLED, sector = %d\n",sectors);
-
-        }
+    size_t sectors = bytes_to_sectors(length);
+    disk_inode->length = length;
+    disk_inode->magic = INODE_MAGIC;
+    
+    if (sectors == 0) {
+        block_write(fs_device, sector, disk_inode);
         free(disk_inode);
+        return true;
     }
+    
+    if (sectors < NUM_OF_DIRECT) {
+        success = disk_inode_allocate(sectors,sector,disk_inode);
+
+    } else if (sectors < NUM_OF_DIRECT + NUM_OF_INDIRECT * 128){
+        //直接指针不够，还要加上间接指针
+        //1.先分配 NUM_OF_INDIRECT 个连续块
+        success = disk_inode_allocate(NUM_OF_DIRECT,sector,disk_inode);
+        if (success == false) { return success; }
+
+        //2.再计算要分配多少个间接块
+        uint16_t indirect_num = DIV_ROUND_UP(sectors - NUM_OF_DIRECT,128);
+
+        //3.分配间接块
+        success = indirect_inode_allocate(indirect_num, disk_inode);
+        
+        //4.把间接块的扇区号写入indirect数组
+        block_write(fs_device,sector,disk_inode);
+
+    } else {
+        PANIC("NOT　IMPLED, sector = %d\n",sectors);
+
+    }
+    free(disk_inode);
     return success;
 }
 
@@ -428,13 +427,20 @@ void inode_close(struct inode* inode) {
         free_map_release(inode->sector, 1);
         size_t num = bytes_to_sectors(inode->data.length);
         if (num < NUM_OF_DIRECT) {
-            free_map_release(inode->data.direct[0], bytes_to_sectors(inode->data.length));
+            for (int i = 0; i < num; i++) {
+                free_map_release(inode->data.direct[i], 1);
+            }
 
         } else if (num < NUM_OF_DIRECT + 128 * NUM_OF_INDIRECT ) {
-            free_map_release(inode->data.direct[0], bytes_to_sectors(inode->data.length));
+            for (int i = 0; i < NUM_OF_DIRECT; i++) {
+                free_map_release(inode->data.direct[i], 1);
+            }
+            // free_map_release(inode->data.direct[0], bytes_to_sectors(inode->data.length));
             
             size_t indir_num = DIV_ROUND_UP(num - NUM_OF_DIRECT,128);
-            free_map_release(inode->data.indirect[0], indir_num);
+            for (int i = 0; i < indir_num; i++) {
+                free_map_release(inode->data.indirect[i], indir_num);
+            }
 
         } else {
           PANIC("free map not imple\n");

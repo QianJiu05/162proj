@@ -54,10 +54,10 @@ static struct dir* get_start_dir (const char* name) {
     }
     return dir;
 }
-    // a/b/c/d
-    // prev_token = d -->要创建的
-    // token = null 
-    // 此时current = c
+  // a/b/c/d
+  // prev_token = d -->要创建的
+  // token = null 
+  // 此时current = c
 static bool get_directory_and_target (char* path, struct dir** current, char* chdir) {
     char *save_ptr;
     char *token, *prev_token = NULL;
@@ -82,7 +82,6 @@ static bool get_directory_and_target (char* path, struct dir** current, char* ch
         prev_token = token;
     }
 
-    // chdir = prev_token;
     strlcpy(chdir, prev_token, strlen(prev_token)+1);
     return true;
 }
@@ -118,8 +117,7 @@ static bool parse_path (const char* name, struct dir** current, char* chdir) {
         return false;
     }
 
-    bool success;
-    success = get_directory_and_target(copy, &cwd, chdir);
+    bool success = get_directory_and_target(copy, &cwd, chdir);
 
     if (cwd != NULL) {
         *current = cwd;
@@ -179,11 +177,18 @@ struct file* filesys_open(const char* name) {
    Fails if no file named NAME exists,
    or if an internal memory allocation fails. */
 bool filesys_remove(const char* name) {
-  struct dir* dir = dir_open_root();
-  bool success = dir != NULL && dir_remove(dir, name);
-  dir_close(dir);
 
-  return success;
+    struct dir* dir;
+    char* file = malloc(NAME_MAX);
+    parse_path(name, &dir, file);
+
+    bool success = (dir != NULL) && dir_remove(dir, file);
+    dir_close(dir);
+  // struct dir* dir = dir_open_root();
+  // bool success = dir != NULL && dir_remove(dir, name);
+  // dir_close(dir);
+
+    return success;
 }
 
 /* Formats the file system. */
