@@ -277,6 +277,7 @@ static uint32_t syscall_exec(const char* file_name){
     return process_execute(file_name);
 }
 static bool syscall_create(const char *file, unsigned initial_size){
+    if (strlen(file) > 256) return false;
     return filesys_create(file,initial_size);
 }
 static bool syscall_remove(const char *file){
