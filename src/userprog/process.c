@@ -221,9 +221,6 @@ static void start_process(void* _arg) {
         t->tsb->finished = false;
         sema_init(&t->tsb->join_sema,0);
         lock_init(&t->pcb->pthread_lock);
-        
-
-
 
         if (proc_arg->child != NULL) {
             t->pcb->in_parent = proc_arg->child;
@@ -249,7 +246,7 @@ static void start_process(void* _arg) {
       struct process* pcb_to_free = t->pcb;
       t->pcb = NULL;
       if (pcb_to_free->cwd != NULL) {
-        //   free(pcb_to_free->cwd);
+            dir_close(pcb_to_free->cwd);
       }
       free(pcb_to_free);
     }
@@ -407,7 +404,7 @@ void process_exit(void) {
     struct process* pcb_to_free = cur->pcb;
     struct child_process* in_parent = pcb_to_free->in_parent;
 
-    // free(pcb_to_free->cwd);
+    dir_close(pcb_to_free->cwd);
     if(pcb_to_free->file_lock != NULL ){
         lock_release(pcb_to_free->file_lock);
     }
@@ -581,7 +578,7 @@ fail:
         if(pcb_to_free->pagedir != NULL)
             pagedir_destroy(pcb_to_free->pagedir);
         if (pcb_to_free->cwd) {
-            // free(pcb_to_free->cwd);应该是关闭目录
+            dir_close(pcb_to_free->cwd);
         }
         free(pcb_to_free);
     }

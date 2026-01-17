@@ -187,6 +187,7 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
         case SYS_MKDIR:
             f->eax = syscall_mkdir((char*)args[1]);
             break;
+
         case SYS_READDIR:
         case SYS_ISDIR :
         case SYS_INUMBER :
@@ -477,6 +478,7 @@ static bool syscall_chdir(const char* dir) {
         struct dir* new = dir_open(inode);
         if (new != NULL) {
             p->cwd = new;
+            dir_close(cwd);
         } else {
             success = false;
         }
