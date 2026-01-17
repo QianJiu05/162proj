@@ -62,6 +62,7 @@ void userprog_init(void) {
         t->pcb->main_thread = t;
         t->pcb->pagedir = NULL;
         t->pcb->file_lock = NULL;
+        // t->pcb->cwd = dir_open_root();
         memset(&t->pcb->fdt,0,sizeof(t->pcb->fdt));
         lock_init(&t->pcb->pthread_lock);
     }
