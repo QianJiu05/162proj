@@ -69,6 +69,7 @@ static bool get_directory_and_target (char* path, struct dir** current, char* ch
         if (prev_token != NULL) {
             /* 找到子目录,存到inode中 */
             if (!dir_lookup(*current, prev_token, &inode)) {
+                dir_close(*current);
                 printf("find no child dir\n");
                 return false;
             } 

@@ -207,7 +207,8 @@ void inode_init(void) {
 static bool disk_inode_allocate(uint32_t sectors, block_sector_t sector, struct inode_disk* disk_inode) {
     bool success = false;
 
-    for (int i = 0; i < sectors; i++) {
+    int i;
+    for (i = 0; i < sectors; i++) {
         if (free_map_allocate(1, &disk_inode->direct[i])) {
             success = true;
         } else {
@@ -215,6 +216,17 @@ static bool disk_inode_allocate(uint32_t sectors, block_sector_t sector, struct 
             break;
         }
     }
+    /* 分配失败需要回滚 */
+    if (success == false) {
+        i--;
+        while (i > 0)
+        {
+            free_map_release(disk_inode->direct[i], 1);
+            i--;
+        }
+        return success;
+    }
+
     /* disk_inode的内容更新了把更新的信息写入磁盘 */
     block_write(fs_device, sector, disk_inode);
     if (sectors > 0) {
@@ -230,7 +242,8 @@ static bool disk_inode_allocate(uint32_t sectors, block_sector_t sector, struct 
 static bool indirect_sector_allocate(uint16_t num, struct indirect_disk* indirect) {
     bool success = false;
 
-    for (int i = 0; i < num; i++) {
+    int i;
+    for (i = 0; i < num; i++) {
         if (free_map_allocate(1, &indirect->sector[i])) {
             success = true;
         }else {
@@ -238,6 +251,18 @@ static bool indirect_sector_allocate(uint16_t num, struct indirect_disk* indirec
             break;
         }
     }
+
+    /* 分配失败需要回滚 */
+    if (success == false) {
+        i--;
+        while (i > 0)
+        {
+            free_map_release(indirect->sector[i], 1);
+            i--;
+        }
+        return success;
+    }
+
     if (num > 0) {
         size_t i;
         for (i = 0; i < num; i++)
@@ -275,12 +300,14 @@ static bool indirect_inode_allocate(uint16_t indirect_num, struct inode_disk* di
                 block_write(fs_device, disk_inode->indirect[i], indirect_inode);
 
             }else {
-                success = false;
+                // success = false;
+                PANIC("indirect success = false\n");
+
             }
 
-            if (success == false) {
-                PANIC("indirect success = false\n");
-            }
+            // if (success == false) {
+            //     PANIC("indirect success = false\n");
+            // }
         }
         success = true;
         
@@ -317,7 +344,7 @@ bool inode_create(block_sector_t sector, off_t length) {
         free(disk_inode);
         return true;
     }
-    
+
     if (sectors < NUM_OF_DIRECT) {
         success = disk_inode_allocate(sectors,sector,disk_inode);
 
@@ -332,6 +359,7 @@ bool inode_create(block_sector_t sector, off_t length) {
 
         //3.分配间接块
         success = indirect_inode_allocate(indirect_num, disk_inode);
+        if (success == false) { return success; }
         
         //4.把间接块的扇区号写入indirect数组
         block_write(fs_device,sector,disk_inode);
