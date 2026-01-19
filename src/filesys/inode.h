@@ -5,6 +5,9 @@
 #include "filesys/off_t.h"
 #include "devices/block.h"
 
+#define TYPE_FILE 0
+#define TYPE_DIR 1
+
 struct bitmap;
 
 void inode_init(void);
@@ -20,5 +23,7 @@ void inode_deny_write(struct inode*);
 void inode_allow_write(struct inode*);
 off_t inode_length(const struct inode*);
 
+bool set_type_dir (block_sector_t);
+bool inode_is_dir (struct inode*);
 void write_all2_disk(void);
 #endif /* filesys/inode.h */

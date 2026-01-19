@@ -25,11 +25,11 @@
 /* On-disk inode.
    Must be exactly BLOCK_SECTOR_SIZE bytes long. 
    这个结构体存的是文件的元数据而不是文件的数据本身。
-
 */
 struct inode_disk {
     off_t length;         /* File size in bytes. */
     unsigned magic;       /* Magic number. */
+    uint32_t type;        /* type0:dir, type1:file */
 
     /* 直接指针 */
     block_sector_t direct[NUM_OF_DIRECT];         /* 直接指针,指向存数据的sector */
@@ -38,7 +38,13 @@ struct inode_disk {
     block_sector_t indirect[NUM_OF_INDIRECT];        /* 间接指针，指向struct indirect_disk */
     block_sector_t double_indirect[NUM_OF_DOUBLE_INDIR];  /* 二级间接指针, 指向struct double_indirect */
     // uint32_t unused[125]; /* Not used. -->用来占位，让struct刚好占用一个SECTOR */
-    uint32_t unused[14];//128-114=14
+    
+    // block_sector_t cwd;
+    block_sector_t parent;
+    uint32_t using_direct;
+    uint32_t using_indirect;
+    uint32_t using_double;
+    uint32_t unused[9];//128-114-1-4=11
 };
 
 #define INDIRECT_2_SECTOR_NUM   128
@@ -66,6 +72,7 @@ struct inode {
   int deny_write_cnt;     /* 0: writes ok, >0: deny writes. */
   struct inode_disk data; /* Inode content. */
   struct rw_lock rw_lock;
+  uint32_t type;        /* type0:dir, type1:file */
 };
 
 #define CACHE_INODE_NUM   64
@@ -216,6 +223,7 @@ static bool disk_inode_allocate(uint32_t sectors, block_sector_t sector, struct 
             break;
         }
     }
+
     /* 分配失败需要回滚 */
     if (success == false) {
         i--;
@@ -224,8 +232,11 @@ static bool disk_inode_allocate(uint32_t sectors, block_sector_t sector, struct 
             free_map_release(disk_inode->direct[i], 1);
             i--;
         }
+
         return success;
     }
+
+    disk_inode->using_direct = sectors;
 
     /* disk_inode的内容更新了把更新的信息写入磁盘 */
     block_write(fs_device, sector, disk_inode);
@@ -297,20 +308,16 @@ static bool indirect_inode_allocate(uint16_t indirect_num, struct inode_disk* di
             /* 分配间接指针指向的128个sector，扇区号填入indirect_inode
                 把填入扇区号的结构体写入disk */
             if (indirect_sector_allocate(INDIRECT_2_SECTOR_NUM, indirect_inode)) {
+                disk_inode->using_indirect = indirect_num;
                 block_write(fs_device, disk_inode->indirect[i], indirect_inode);
 
-            }else {
-                // success = false;
+            }else {// success = false;
+                
                 PANIC("indirect success = false\n");
 
             }
-
-            // if (success == false) {
-            //     PANIC("indirect success = false\n");
-            // }
         }
         success = true;
-        
         free(indirect_inode);
     } 
 
@@ -338,7 +345,7 @@ bool inode_create(block_sector_t sector, off_t length) {
     size_t sectors = bytes_to_sectors(length);
     disk_inode->length = length;
     disk_inode->magic = INODE_MAGIC;
-    
+
     if (sectors == 0) {
         block_write(fs_device, sector, disk_inode);
         free(disk_inode);
@@ -487,15 +494,12 @@ void inode_remove(struct inode* inode) {
 }
 
 /* 从 INODE 读取 SIZE 个字节到 BUFFER，起始位置为 OFFSET。
-   返回实际读取的字节数，该值可能小于 SIZE，
-   如果发生错误或到达文件末尾。 */
+   返回实际读取的字节数，该值可能小于 SIZE，如果发生错误或到达文件末尾。 */
 off_t inode_read_at(struct inode* inode, void* buffer_, off_t size, off_t offset) {
     uint8_t* buffer = buffer_;
     off_t bytes_read = 0;
-    // uint8_t* bounce = NULL;
     struct cache_inode* cache = NULL;
 
-    // lock_acquire(&inode->lock);
     rw_lock_acquire(&inode->rw_lock,1);
 
     while (size > 0) {
@@ -510,8 +514,14 @@ off_t inode_read_at(struct inode* inode, void* buffer_, off_t size, off_t offset
 
         /* Number of bytes to actually copy out of this sector. */
         int chunk_size = size < min_left ? size : min_left;
-        if (chunk_size <= 0)
+
+        if (chunk_size <= 0) {
+            /* 创建一个新inode块用于容纳剩下的数据 */
+            // free_map_allocate(1, sector_idx);
+            // inode_create(sector_idx, )
             break;
+        }
+            // break;
 
         /* 缓存命中判断:如果要读的inode已经在cache里了，那么不需要block_read */
         cache = find_cache_inode(sector_idx);
@@ -543,9 +553,7 @@ off_t inode_read_at(struct inode* inode, void* buffer_, off_t size, off_t offset
         bytes_read += chunk_size;
     }
 
-    // lock_release(&inode->lock);
     rw_lock_release(&inode->rw_lock,1);
-
     return bytes_read;
 }
 
@@ -641,3 +649,14 @@ void inode_allow_write(struct inode* inode) {
 
 /* Returns the length, in bytes, of INODE's data. */
 off_t inode_length(const struct inode* inode) { return inode->data.length; }
+
+bool set_type_dir (block_sector_t sector) {
+    struct inode* inode = inode_open(sector);
+
+    if (inode == NULL) { return false; }
+    inode->data.type = TYPE_DIR;
+    return true;
+}
+bool inode_is_dir (struct inode* inode) {
+    return (inode->type == TYPE_DIR);
+}

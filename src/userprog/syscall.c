@@ -48,8 +48,12 @@ static bool syscall_sema_init(sema_t* sema, int val);
 static bool syscall_sema_up(sema_t* sema);
 static bool syscall_sema_down(sema_t* sema);
 static tid_t syscall_get_tid(void);
-static bool syscall_mkdir(const char* dir);
-static bool syscall_chdir(const char* dir);
+static bool syscall_mkdir(const char* name);
+static bool syscall_chdir(const char* name);
+// static bool syscall_readdir(int fd, char name[READDIR_MAX_LEN + 1]);
+static bool syscall_readdir(int fd, char* name);
+static bool syscall_isdir(int fd);
+static int syscall_inumber(int fd);
 //arg[0]是调用号，其余是参数
 static void syscall_handler(struct intr_frame* f UNUSED) {
     //调用者的堆栈指针可以通过传递给它的 struct intr_frame 的 esp 成员访问。指针数组
@@ -188,7 +192,11 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
             f->eax = syscall_mkdir((char*)args[1]);
             break;
         case SYS_READDIR:
+            f->eax = syscall_readdir((int)args[1],(char*)args[2]);
+            break;
         case SYS_ISDIR :
+            f->eax = syscall_isdir((int)args[1]);
+            break;
         case SYS_INUMBER :
             PANIC("syscall not imple2\n");
     }
@@ -381,6 +389,7 @@ static int syscall_write(int fd, void* buffer, size_t size){
             // printf("fd error!\n");
             return -1; 
         }
+        // if (syscall_isdir(fd)) { return -1; }
         int ret = file_write(p->fdt.file_ptr[fd],buffer,size);
         return ret;
     }
@@ -449,22 +458,23 @@ static bool syscall_sema_down(sema_t* sema){
 static tid_t syscall_get_tid(void){
     return thread_tid();
 }
-static bool syscall_mkdir(const char* dir) {
+static bool syscall_mkdir(const char* name) {
     /* 建立一个目录 */
     block_sector_t sector;
     bool success = false;
     if (free_map_allocate(1, &sector)) {
         success = dir_create(sector,16);
     }
-    if (success) {
+
+    if (success) { 
         struct process* p = thread_current()->pcb;
         /* 把目录写到父目录里 */
-        success = dir_add(p->cwd, dir, sector);
+        success = dir_add(p->cwd, name, sector);
     }
-    return success;
 
+    return success;
 }
-static bool syscall_chdir(const char* dir) {
+static bool syscall_chdir(const char* name) {
     struct inode* inode = NULL;
     bool success = false;
     /* 获取当前目录 */
@@ -472,7 +482,7 @@ static bool syscall_chdir(const char* dir) {
 
     struct dir* cwd = p->cwd;
 
-    success = dir_lookup(cwd, dir, &inode);
+    success = dir_lookup(cwd, name, &inode);
 
     if (success) {
         struct dir* new = dir_open(inode);
@@ -485,3 +495,16 @@ static bool syscall_chdir(const char* dir) {
 
     return success;
 }
+static bool syscall_readdir(int fd, char* name) {
+    PANIC("syscall not imple\n");
+}
+static bool syscall_isdir(int fd) {
+    /* 范围检查 */
+    if(fd < 2 || fd >= MAX_FD_NUM) { return -1; }
+
+    struct process* p = thread_current()->pcb;
+    /* 检查是否存在 */
+    if(p->fdt.using[fd] == false) { return -1; }
+    return file_is_dir(p->fdt.file_ptr[fd]);
+}
+static int syscall_inumber(int fd);

@@ -19,10 +19,15 @@ struct dir_entry {
   bool in_use;                 /* In use or free? */
 };
 
-/* Creates a directory with space for ENTRY_CNT entries in the
-   given SECTOR.  Returns true if successful, false on failure. */
+/* 在指定的扇区 (SECTOR) 中创建一个目录，该目录可容纳 ENTRY_CNT 个条目。
+  成功返回 true，失败返回 false。 */
 bool dir_create(block_sector_t sector, size_t entry_cnt) {
-  return inode_create(sector, entry_cnt * sizeof(struct dir_entry));
+    // if (inode_create(sector, entry_cnt * sizeof(struct dir_entry)) == false) {
+    //     return false;
+    // }
+    // return set_type_dir(sector);
+
+    return inode_create(sector, entry_cnt * sizeof(struct dir_entry));
 }
 
 /* Opens and returns the directory for the given INODE, of which
@@ -108,12 +113,9 @@ bool dir_lookup(const struct dir* dir, const char* name, struct inode** inode) {
   return *inode != NULL;
 }
 
-/* Adds a file named NAME to DIR, which must not already contain a
-   file by that name.  The file's inode is in sector
-   INODE_SECTOR.
-   Returns true if successful, false on failure.
-   Fails if NAME is invalid (i.e. too long) or a disk or memory
-   error occurs. */
+/* 将名为 NAME 的文件添加到目录 DIR 中，该目录不能已存在同名文件。
+  该文件的 inode 位于扇区 INODE_SECTOR。成功返回 true，失败返回 false。
+  如果 NAME 无效（例如过长）或发生磁盘或内存错误，则操作失败。 */
 bool dir_add(struct dir* dir, const char* name, block_sector_t inode_sector) {
   struct dir_entry e;
   off_t ofs;
@@ -130,13 +132,10 @@ bool dir_add(struct dir* dir, const char* name, block_sector_t inode_sector) {
   if (lookup(dir, name, NULL, NULL))
     goto done;
 
-  /* Set OFS to offset of free slot.
-     If there are no free slots, then it will be set to the
-     current end-of-file.
-
-     inode_read_at() will only return a short read at end of file.
-     Otherwise, we'd need to verify that we didn't get a short
-     read due to something intermittent such as low memory. */
+  /* 将 OFS 设置为空闲槽的偏移量。
+    如果没有空闲槽，则将其设置为当前文件末尾。
+    inode_read_at() 只会返回文件末尾的短读取。
+    否则，我们需要验证短读取是否是由于某些间歇性问题（例如内存不足）造成的。 */
   for (ofs = 0; inode_read_at(dir->inode, &e, sizeof e, ofs) == sizeof e; ofs += sizeof e)
     if (!e.in_use)
       break;
