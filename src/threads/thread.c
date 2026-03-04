@@ -85,10 +85,15 @@ static struct thread* thread_schedule_fair(void);
 static struct thread* thread_schedule_mlfqs(void);
 static struct thread* thread_schedule_reserved(void);
 
+/* prio scheduler */
 static void init_prio_table(struct prio_list_table* table);
 static bool push_prio_table(struct prio_list_table* table, struct thread* t);
 static struct thread* pop_prio_table(struct prio_list_table* table);
-static struct thread* get_min_vruntime(struct list* list);
+/* CFS scheduler */
+static void insert_to_fair_list(struct list* list, struct thread* t);
+static struct thread* get_min_vruntime_thread(struct list* list);
+static int get_min_vruntime(struct list* list);
+static uint32_t get_stride(int priority) ;
 
 /* Determines which scheduler the kernel should use.
    Controlled by the kernel command-line options
@@ -120,7 +125,7 @@ void thread_init(void) {
     lock_init(&tid_lock);
     switch(active_sched_policy){
         case SCHED_FAIR:
-            // list_init(&fair_ready_list);
+            list_init(&fair_ready_list);
             break;
         case SCHED_FIFO:
             list_init(&fifo_ready_list);
@@ -171,12 +176,12 @@ void thread_tick(void) {
   else
     kernel_ticks++;
   
-  disk_ticks++;
-  //1s 100tick-> 30s 3000 tick
-  if(disk_ticks >= DISK_SYNC_TICK) {
-      disk_sync = true;
-      disk_ticks = 0;
-  }
+  // disk_ticks++;
+  // //1s 100tick-> 30s 3000 tick
+  // if(disk_ticks >= DISK_SYNC_TICK) {
+  //     disk_sync = true;
+  //     disk_ticks = 0;
+  // }
 
   if (active_sched_policy == SCHED_FAIR && t != idle_thread) {
       t->vruntime += t->stride;
@@ -240,7 +245,9 @@ tid_t thread_create(const char* name, int priority, thread_func* function, void*
   thread_unblock(t);
        
   /* 如果新建的优先级高于当前优先级，立即抢占 */
-  if(active_sched_policy == SCHED_PRIO && t->priority > thread_current()->priority){
+  if(active_sched_policy == SCHED_PRIO && 
+      t->priority > thread_current()->priority)
+  {
       thread_yield();
   }
 
@@ -281,18 +288,19 @@ static void thread_enqueue(struct thread* t) {
           break;
 
       case SCHED_FAIR:
+          // 新唤醒的线程(不在就绪链表内)继承当前最小 vruntime
+          // 不然太久没运行vruntime太小，导致其他线程饥饿
+          if (!list_empty(&fair_ready_list)) {
+            struct list_elem* e = list_back(&fair_ready_list);
+            struct thread* min_t = list_entry(e, struct thread, elem);
+            if (t->vruntime < min_t->vruntime)
+              t->vruntime = min_t->vruntime;  // 防止饥饿
+          }
+          insert_to_fair_list(&fair_ready_list, t);
+          break;
       default:
           PANIC("Unimplemented scheduling policy value: %d", active_sched_policy);
   }
-  /* prio可以直接复用fifo的list，因为插入时是不需要有序的 */
-  // if (active_sched_policy == SCHED_FIFO || active_sched_policy == SCHED_PRIO ){
-  //     list_push_back(&fifo_ready_list, &t->elem);
-  // // } else if (active_sched_policy == SCHED_FAIR) {
-  // //     list_push_back(&fair_ready_list, &t->elem);
-  // }
-  // else{
-  //     PANIC("Unimplemented scheduling policy value: %d", active_sched_policy);
-  // }
 }
 
 /* 将阻塞的线程 T 转换为就绪状态。
@@ -386,6 +394,9 @@ void thread_set_priority(int new_priority) {
 
     int old_priority = cur->priority;
     cur->priority = find_max_priority(&cur->holding_lock); 
+
+    if (active_sched_policy == SCHED_FAIR)
+        cur->stride = get_stride(cur->priority);
     /* 只有当优先级降低了，才可能被抢占，提高不会(否则不会运行当前线程) */
     if(active_sched_policy == SCHED_PRIO && old_priority > new_priority){
         thread_yield();
@@ -469,14 +480,7 @@ struct thread* running_thread(void) {
 /* Returns true if T appears to point to a valid thread. */
 static bool is_thread(struct thread* t) { return t != NULL && t->magic == THREAD_MAGIC; }
 
-// stride = (88761 << 18) / weight   // 精度 18 位
-static uint16_t get_stride(int priority) {
-    // if(priority <= 0){ priority = PRI_MIN; }
-    uint64_t temp =  (uint64_t)BIG_CONST << 18;
-    uint16_t stride = temp / (priority + 1);
-    if(stride == 0) stride = 1;
-    return stride;
-}
+
 /* Does basic initialization of T as a blocked thread named
    NAME. */
 static void init_thread(struct thread* t, const char* name, int priority) {
@@ -490,15 +494,24 @@ static void init_thread(struct thread* t, const char* name, int priority) {
     t->status = THREAD_BLOCKED;
     strlcpy(t->name, name, sizeof t->name);
     t->stack = (uint8_t*)t + PGSIZE;
+
     t->priority = priority;
     t->origin_priority = priority;
     t->pcb = NULL;
     t->magic = THREAD_MAGIC;
     list_init(&t->holding_lock); 
     list_init(&t->file_lock);
-    t->waiting_lock = NULL;      
-    t->vruntime = 0;
-    t->stride = get_stride(priority);
+    t->waiting_lock = NULL;    
+
+    //cfs调度
+    if (active_sched_policy == SCHED_FAIR) {
+        if (list_empty(&fair_ready_list)) {
+            t->vruntime = MIN_VRUNTIME;
+        } else {
+            t->vruntime = get_min_vruntime(&fair_ready_list);
+        }
+        t->stride = get_stride(priority);
+    }
 
     old_level = intr_disable();
     list_push_back(&all_list, &t->allelem);
@@ -538,12 +551,12 @@ static struct thread* thread_schedule_prio(void) {
 
 /* Fair priority scheduler */
 static struct thread* thread_schedule_fair(void) {
-  PANIC("Unimplemented scheduler policy: \"-sched=fair\"");
-//   if(!list_empty(&fair_ready_list)){
-//       return get_min_vruntime(&fair_ready_list);
-//   }  
-//   else
-//       return idle_thread;
+  // PANIC("Unimplemented scheduler policy: \"-sched=fair\"");
+  if(!list_empty(&fair_ready_list)){
+      return get_min_vruntime_thread(&fair_ready_list);
+  }  
+  else
+      return idle_thread;
 }
 
 /* Multi-level feedback queue scheduler */
@@ -615,9 +628,10 @@ static void schedule(void) {
 
   // cur->vruntime += cur->stride * thread_ticks;
 
-  if (disk_sync) {
-      write_all2_disk();
-  }
+  // if (disk_sync) {
+  //     write_all2_disk();
+  //     disk_sync = false;
+  // }
 
   if (cur != next)
     prev = switch_threads(cur, next);//这是汇编
@@ -677,25 +691,86 @@ static struct thread* pop_prio_table(struct prio_list_table* table) {
     return t;
 }
 
-/* CFS schedule */
-static struct thread* get_min_vruntime(struct list* list){
-    unsigned long min_time = ULONG_MAX ;
-    struct thread* min_thread = NULL;
-    struct list_elem* min_elem = NULL;
+/* ===== CFS schedule ===== */
+/* Stride Scheduling 配置 */
+#define STRIDE_SHIFT 18                      // 精度位数
+#define BASE_STRIDE (88761 << STRIDE_SHIFT)  // 基准步长 (约 2^33)
 
-    for(struct list_elem *e = list_begin(list); e != list_end(list); e = list_next(e)){
-        struct thread* t = list_entry(e,struct thread, elem);
-        if(t->vruntime < min_time){
-            min_thread = t;
-            min_elem = e;
-            min_time = t->vruntime;
+/* Priority 到 Weight 的映射
+ * Linux 风格映射: priority 0-63 -> weight 88761-15
+ * 公式: weight = BASE_WEIGHT / (1.25 ^ (priority - 20))  */
+static const uint32_t prio_to_weight[64] = {
+    /* priority 0-9 */
+    88761, 71755, 56483, 46273, 36291,
+    29154, 23254, 18705, 14949, 11916,
+    /* priority 10-19 */
+    9548, 7620, 6100, 4904, 3906,
+    3121, 2501, 1991, 1586, 1277,
+    /* priority 20-29 (默认优先级 = 20) */
+    1024, 820, 655, 526, 423,
+    335, 272, 215, 172, 137,
+    /* priority 30-39 */
+    110, 87, 70, 56, 45,
+    36, 29, 23, 18, 15,
+    /* priority 40-49 */
+    12, 9, 7, 6, 5,
+    4, 3, 3, 2, 2,
+    /* priority 50-59 */
+    1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1,
+    /* priority 60-63 */
+    1, 1, 1, 1
+};
+
+/* 根据优先级计算 stride
+ * stride 越小，调度越频繁
+ * priority 高 -> weight 大 -> stride 小 -> 运行更频繁  */
+static uint32_t get_stride(int priority) {
+    ASSERT(priority >= PRI_MIN && priority <= PRI_MAX);
+    /* 将 priority 映射到权重表索引 (0-63) */
+    int weight_idx = priority - PRI_MIN;
+    if (weight_idx < 0) weight_idx = 0;
+    if (weight_idx > 63) weight_idx = 63;
+    
+    uint32_t weight = prio_to_weight[weight_idx];
+    
+    /* 计算 stride = BASE_STRIDE / weight */
+    uint32_t stride = BASE_STRIDE / weight;
+    /* 防止 stride 为 0 */
+    if (stride == 0) stride = 1;
+    
+    return stride;
+}
+
+/* 由于插入是有序的，所以只要把最末尾的pop就行 */
+static struct thread* get_min_vruntime_thread(struct list* list){
+    struct list_elem *e = list_pop_back(list);
+    struct thread* t = list_entry(e,struct thread, elem);
+    return t;
+}
+static int get_min_vruntime(struct list* list){
+    if (list_empty) {
+        printf("list empty! no vruntime\n");
+        return -1;
+    }
+    struct list_elem *e = list_pop_back(list);
+    struct thread* t = list_entry(e,struct thread, elem);
+    return t->vruntime;
+}
+static void insert_to_fair_list(struct list* list, struct thread* t) {
+    struct list_elem *e;
+    
+    /* 从前往后遍历,找到第一个 vruntime <= t->vruntime 的位置 */
+    for (e = list_begin(list); e != list_end(list); e = list_next(e)) {
+        struct thread* cur = list_entry(e, struct thread, elem);
+        
+        /* 降序排列：如果当前线程的 vruntime 更小,插在它前面 */
+        if (cur->vruntime <= t->vruntime) {
+            list_insert(e, &t->elem);  // 插在 cur 前面
+            return;
         }
     }
-    if(min_elem != NULL)
-        list_remove(min_elem);
-        
-    if(min_time == ULONG_MAX)
-        printf("get min vruntime is ULONG_MAX!\n");
     
-    return min_thread;
+    /* 如果比所有线程的 vruntime 都小,插在末尾 */
+    list_push_back(list, &t->elem);
 }

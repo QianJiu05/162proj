@@ -2,7 +2,10 @@
    longer the highest-priority thread in the system no longer
    requires that it yield immediately! It should, however,
    be pre-empted eventually. */
-
+/*  降低线程优先级，使其不再是系统中优先级最高的线程，
+    不再需要它立即让出控制权！
+    但是，它最终应该被抢占。 */
+    
 #include <stdio.h>
 #include "tests/threads/tests.h"
 #include "threads/init.h"
