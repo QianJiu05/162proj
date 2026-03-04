@@ -291,10 +291,13 @@ static void thread_enqueue(struct thread* t) {
           // 新唤醒的线程(不在就绪链表内)继承当前最小 vruntime
           // 不然太久没运行vruntime太小，导致其他线程饥饿
           if (!list_empty(&fair_ready_list)) {
-            struct list_elem* e = list_back(&fair_ready_list);
-            struct thread* min_t = list_entry(e, struct thread, elem);
-            if (t->vruntime < min_t->vruntime)
-              t->vruntime = min_t->vruntime;  // 防止饥饿
+            int min = get_min_vruntime(&fair_ready_list);
+            if (min != -1 ) {
+                if (t->vruntime < min)
+                  t->vruntime = min;  // 防止饥饿
+            } else {
+                printf("shouldn't get this value\n");
+            }
           }
           insert_to_fair_list(&fair_ready_list, t);
           break;
@@ -749,11 +752,11 @@ static struct thread* get_min_vruntime_thread(struct list* list){
     return t;
 }
 static int get_min_vruntime(struct list* list){
-    if (list_empty) {
-        printf("list empty! no vruntime\n");
-        return -1;
-    }
-    struct list_elem *e = list_pop_back(list);
+    // if (list_empty(list)) {
+    //     printf("list empty! no vruntime\n");
+    //     return -1;
+    // }
+    struct list_elem *e = list_back(list);
     struct thread* t = list_entry(e,struct thread, elem);
     return t->vruntime;
 }
