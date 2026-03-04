@@ -589,7 +589,8 @@ fail:
     thread_exit();//这里没有释放pcb的pd。会造成内存泄漏嘛?-->process_exit?
 }
 static bool copy_memory(uint32_t* parent,uint32_t* child){
-    void* addr = (void*)0;
+    // void* addr = (void*)0;
+    void* addr = (void*)0x08048000;
     void* vpage = NULL;
     bool writable = false;
 
@@ -757,29 +758,33 @@ bool load(struct pass_args* arg, void (**eip)(void), void** esp) {
       case PT_STACK:
       default:
         /* Ignore this segment. */
+        /* 不处理以上这些段 */
         break;
       case PT_DYNAMIC:
       case PT_INTERP:
       case PT_SHLIB:
         goto done;
-      case PT_LOAD:
-        if (validate_segment(&phdr, file)) {
+        /* 不支持，遇到这三种段直接崩溃，goto done */
+      case PT_LOAD://可加载段
+        if (validate_segment(&phdr, file)) {//段有效
           bool writable = (phdr.p_flags & PF_W) != 0;
-          uint32_t file_page = phdr.p_offset & ~PGMASK;
-          uint32_t mem_page = phdr.p_vaddr & ~PGMASK;
-          uint32_t page_offset = phdr.p_vaddr & PGMASK;
+          /* 计算页对齐的文件偏移和虚拟地址 */
+          uint32_t file_page = phdr.p_offset & ~PGMASK; // 文件中的页起始位置
+          uint32_t mem_page = phdr.p_vaddr & ~PGMASK;   // 内存中的页起始位置
+          uint32_t page_offset = phdr.p_vaddr & PGMASK; // 页内偏移
           uint32_t read_bytes, zero_bytes;
+          /* 计算需要从文件读取的字节数和需要零填充的字节数 */
           if (phdr.p_filesz > 0) {
-            /* Normal segment.
-                     Read initial part from disk and zero the rest. */
+            /* 普通段：从磁盘读取部分，剩余部分填零（如 .bss 段） */
             read_bytes = page_offset + phdr.p_filesz;
             zero_bytes = (ROUND_UP(page_offset + phdr.p_memsz, PGSIZE) - read_bytes);
           } else {
-            /* Entirely zero.
-                     Don't read anything from disk. */
+            /* Entirely zero.Don't read anything from disk.
+                     完全零填充的段（如纯 .bss 段） */
             read_bytes = 0;
             zero_bytes = ROUND_UP(page_offset + phdr.p_memsz, PGSIZE);
           }
+          /* 加载段到内存 */
           if (!load_segment(file, file_page, (void*)mem_page, read_bytes, zero_bytes, writable))
             goto done;
         } else
