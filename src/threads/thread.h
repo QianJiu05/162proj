@@ -103,8 +103,8 @@ struct thread {
     struct list file_lock;
 
     /* fair schedule */
-    unsigned long vruntime;   /* 虚拟运行时间 */
-    uint16_t stride;          /* 步幅 */
+    uint64_t vruntime;   /* 虚拟运行时间 */
+    uint64_t stride;          /* 步幅 */
 
   #ifdef USERPROG
     /* Owned by process.c. */
