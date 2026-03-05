@@ -328,7 +328,7 @@ static void thread_enqueue(struct thread* t) {
   很重要：如果调用者禁用了中断，
   它可能会期望能够原子地解除线程阻塞并更新其他数据。 */
 void thread_unblock(struct thread* t) {
-  printf("[schedule]unblock:%d,vruntime=%llu\n",t->tid,t->vruntime);
+  // printf("[schedule]unblock:%d,vruntime=%llu\n",t->tid,t->vruntime);
   enum intr_level old_level;
 
   ASSERT(is_thread(t));

@@ -141,6 +141,7 @@ static struct lock disk_alloc_lock;
 static struct cache_inode* find_cache_inode(block_sector_t sector) {
     for (int i = 0; i < CACHE_INODE_NUM; i++){
         if (cache_table.buffer[i].sector == sector &&  cache_table.buffer[i].valid) {
+            cache_table.buffer[i].recent_used = true;
             return &(cache_table.buffer[i]);
         }
     }
@@ -528,7 +529,7 @@ off_t inode_read_at(struct inode* inode, void* buffer_, off_t size, off_t offset
         if (cache != NULL) {
             cache->pinned = true;
             memcpy(buffer + bytes_read, cache->data + sector_ofs, chunk_size);
-            cache->recent_used = true;
+            // cache->recent_used = true;
             cache->pinned = false;
 
             size -= chunk_size;
