@@ -18,9 +18,6 @@
    the TID of the main thread of the process */
 typedef tid_t pid_t;
 
-/* Thread functions (Project 2: Multithreading) */
-typedef void (*pthread_fun)(void*);
-typedef void (*stub_fun)(pthread_fun, void*);
 
 struct child_process{
    pid_t pid;
@@ -88,10 +85,7 @@ pid_t process_fork(void);
 bool is_main_thread(struct thread*, struct process*);
 pid_t get_pid(struct process*);
 
-tid_t pthread_execute(stub_fun, pthread_fun, const void*);
-tid_t pthread_join(tid_t);
-void pthread_exit(void);
-void pthread_exit_main(void);
+
 
 
 

@@ -98,6 +98,13 @@ static void kill(struct intr_frame* f) {
   }
 }
 
+/* 
+interrupt.c: Returns true if this trap to the OS was from userspace 
+static inline bool is_trap_from_userspace(struct intr_frame* frame) {
+  return (frame->cs == SEL_UCSEG) && (frame->ss == SEL_UDSEG);
+}
+*/
+
 /* 页面错误处理程序。这是一个框架，需要填充才能实现虚拟内存。
    项目 2 的某些解决方案可能也需要修改此代码。
    在入口处，发生错误的地址位于 CR2（控制寄存器 2）中，
@@ -133,6 +140,9 @@ static void page_fault(struct intr_frame* f) {
   /* 要实现虚拟内存，请删除函数体的其余部分，
      并将其替换为将 fault_addr 指向的页面加载到该页面的代码。
    */
+   // if (is_trap_from_userspace(f)) {
+   //    /* 判断当前线程的pagedir是否失效，如果是，free */
+   // }
 
   printf("Page fault at %p: %s error %s page in %s context.\n", fault_addr,
          not_present ? "not present" : "rights violation", write ? "writing" : "reading",

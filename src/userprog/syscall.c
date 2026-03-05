@@ -14,6 +14,7 @@
 #include "filesys/inode.h"
 #include "filesys/free-map.h"
 #include "userprog/usersync.h"
+#include "userprog/pthread.h"
 
 static void syscall_handler(struct intr_frame*);
 
