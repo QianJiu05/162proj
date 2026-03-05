@@ -48,8 +48,9 @@ struct process {
    struct thread* main_thread; /* Pointer to main thread */
 
    /* 文件 */
-   struct file_descript_table fdt;    /* 文件描述符 */
-   struct file* elf;          /* 可执行文件的指针，用于退出时关闭 */
+   struct file_descript_table fdt;  /* 文件描述符 */
+   struct file* elf;                /* 可执行文件的指针，用于退出时关闭 */
+   struct lock* file_lock;    /* 文件系统锁，获取时指向它，释放时NULL */
 
    /* 子进程 */
    struct list child_list;     /* 子进程pid链表 */
@@ -57,12 +58,13 @@ struct process {
 
    struct intr_frame saved_if;
 
-   struct lock* file_lock;    /* 文件系统锁，获取时指向它，释放时NULL */
+
    /* 多线程 */
    struct list multi_thread;  /* 用于挂载多线程tsb */
+   struct lock pthread_lock;  /* 分配stack时使用 */
 
    /* 用户态同步量 */
-   struct lock pthread_lock;
+   struct lock user_sync_lock;   /* 初始化锁和信号量时使用 */
    struct lock* userlock[MAX_LOCK_NUM];
    struct semaphore* usersema[MAX_LOCK_NUM];
 
@@ -91,14 +93,6 @@ tid_t pthread_join(tid_t);
 void pthread_exit(void);
 void pthread_exit_main(void);
 
-/* Synchronization Types */
-typedef char lock_t;
-typedef char sema_t;
-bool user_lock_init(lock_t* lock);
-bool user_lock_acquire(lock_t* lock);
-bool user_lock_release(lock_t* lock);
-bool user_sema_init(sema_t* sema, int val);
-bool user_sema_up(sema_t* sema);
-bool user_sema_down(sema_t* sema);
+
 
 #endif /* userprog/process.h */

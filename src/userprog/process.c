@@ -32,7 +32,7 @@ bool load(struct pass_args* arg, void (**eip)(void), void** esp);
 bool setup_thread(void (**eip)(void), void** esp);
 extern initial_thread;
 struct lock file_lock;
-struct lock user_sema_lock;
+// struct lock user_sema_lock;
 
 static bool copy_memory(uint32_t* parent,uint32_t* child);
 static void start_fork_process(struct child_process *chpcb);
@@ -65,9 +65,10 @@ void userprog_init(void) {
         // t->pcb->cwd = dir_open_root();不能，否则打不开
         memset(&t->pcb->fdt,0,sizeof(t->pcb->fdt));
         lock_init(&t->pcb->pthread_lock);
+        lock_init(&t->pcb->user_sync_lock);
+
     }
     lock_init(&file_lock);
-    lock_init(&user_sema_lock);
 
     /* Kill the kernel if we did not succeed */
     ASSERT(success);
@@ -222,6 +223,7 @@ static void start_process(void* _arg) {
         t->tsb->finished = false;
         sema_init(&t->tsb->join_sema,0);
         lock_init(&t->pcb->pthread_lock);
+        lock_init(&t->pcb->user_sync_lock);
         
 
 
@@ -517,6 +519,7 @@ static void start_fork_process(struct child_process *chpcb){
     list_init(&(t->pcb->child_list));
     list_init(&(t->pcb->multi_thread));
     lock_init(&t->pcb->pthread_lock);
+        lock_init(&t->pcb->user_sync_lock);
 
     t->pcb->cwd = t->parent->pcb->cwd;
 
@@ -1308,104 +1311,7 @@ void pthread_exit_main(void) {
 }
 
 
-/* ====================  user sync part ====================  */
-bool user_lock_init(lock_t* lock) {
-    if(lock == NULL)return false;
 
-    struct process *p = thread_current()->pcb;
-
-    lock_acquire(&user_sema_lock);
-    for(int idx = 0; idx < MAX_LOCK_NUM; idx++){
-        if(p->userlock[idx] == NULL){
-            struct lock* new = malloc(sizeof(struct lock));
-            if(new == NULL){
-                lock_release(&user_sema_lock);
-                return false;
-            }
-            lock_init(new);
-
-            p->userlock[idx] = new;
-            *lock = (lock_t)idx;
-            lock_release(&user_sema_lock);
-            return true;
-        }
-    }
-    lock_release(&user_sema_lock);
-    return false;
-}
-
-bool user_lock_acquire(lock_t* lock) { 
-    if(lock == NULL || *lock >= MAX_LOCK_NUM || *lock < 0)return false;
-
-    struct thread *t = thread_current();
-    struct process *p = t->pcb;
-    if(p->userlock[*lock] == NULL || p->userlock[*lock]->holder == t){
-        return false;
-    }
-    lock_acquire(p->userlock[*lock]);
-    return true;
-}
-
-bool user_lock_release(lock_t* lock) {
-    if(lock == NULL || *lock >= MAX_LOCK_NUM || *lock < 0)return false;
-
-    struct thread *t = thread_current();
-    struct process *p = t->pcb;
-
-    if(p->userlock[*lock] == NULL || p->userlock[*lock]->holder != t){
-        return false;
-    }
-    lock_release(p->userlock[*lock]);
-    return true;
-}
-
-bool user_sema_init(sema_t* sema, int val) {
-    //这里是做赋值，不用判断
-    if(sema == NULL || val < 0){return false;}
-
-    struct process *p = thread_current()->pcb;
-    
-    lock_acquire(&user_sema_lock);
-    for(int idx = 0; idx < MAX_LOCK_NUM; idx++){
-        if(p->usersema[idx] == NULL){
-            struct semaphore* new = malloc(sizeof(struct semaphore));
-            if(new == NULL){
-                lock_release(&user_sema_lock);  
-                return false;
-            }
-            sema_init(new,val);
-
-            p->usersema[idx] = new;
-            *sema = (sema_t)idx;
-            lock_release(&user_sema_lock);
-            return true;
-        }
-    }
-    lock_release(&user_sema_lock);
-    return false;
-}
-bool user_sema_up(sema_t* sema) {
-    if(sema == NULL || *sema >= MAX_LOCK_NUM || *sema < 0){return false;}
-
-    struct thread *t = thread_current();
-    struct process *p = t->pcb;
-    if(p->usersema[*sema] == NULL){
-        return false;
-    }
-    sema_up(p->usersema[*sema]);
-    return true;
-}
-bool user_sema_down(sema_t* sema) {
-    if(sema == NULL || *sema >= MAX_LOCK_NUM || *sema < 0){return false;}
-
-    struct thread *t = thread_current();
-    struct process *p = t->pcb;
-    if(*sema >= MAX_LOCK_NUM || p->usersema[*sema] == NULL){
-        return false;
-    }
-    sema_down(p->usersema[*sema]);
-    return true;
-}
 
 /* ====================  helper ==================== */
 static void release_holding_lock(struct list* list){
