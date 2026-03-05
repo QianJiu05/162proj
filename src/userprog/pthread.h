@@ -8,7 +8,7 @@
 typedef void (*pthread_fun)(void*);
 typedef void (*stub_fun)(pthread_fun, void*);
 
-struct exec_arg{
+struct pthread_create_arg{ 
     stub_fun sf ;
     pthread_fun tf ; 
     void* arg;

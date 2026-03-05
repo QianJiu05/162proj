@@ -33,7 +33,7 @@ bool setup_thread(void (**eip)(void), void** esp);
   并且应该类似于 process_execute()。
 */
 tid_t pthread_execute(stub_fun sf , pthread_fun tf , const void* arg ) {
-    struct exec_arg* thread_arg = calloc(sizeof(struct exec_arg),1);
+    struct pthread_create_arg* thread_arg = calloc(sizeof(struct pthread_create_arg),1);
     if(thread_arg == NULL){
         return TID_ERROR;
     }
@@ -66,7 +66,7 @@ tid_t pthread_execute(stub_fun sf , pthread_fun tf , const void* arg ) {
   start_process主要进行参数填充，pcb建立以及初始化， */
 static void start_pthread(void* exec_ ) {
     bool success = false;
-    struct exec_arg* exec = (struct exec_arg*)exec_;
+    struct pthread_create_arg* exec = (struct pthread_create_arg*)exec_;
     struct intr_frame if_;
     struct thread *t = thread_current();
     

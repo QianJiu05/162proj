@@ -105,7 +105,7 @@ static void parse_args(const char* file_name, struct pass_args *arg){
     arg->argc = cnt;
     free(cmd);
 }
-struct process_exec_arg{
+struct process_create_arg{
     char* fn_copy;
     struct child_process* child;
 };
@@ -155,7 +155,7 @@ pid_t process_execute(const char* file_name) {
     sema_init(&(child->sema),0);
     list_push_back(&(t->pcb->child_list),&(child->elem));//要关中断吗？
 
-    struct process_exec_arg* proc_arg = calloc(1,sizeof(struct process_exec_arg));
+    struct process_create_arg* proc_arg = calloc(1,sizeof(struct process_create_arg));
     proc_arg->child = child;
     proc_arg->fn_copy = fn_copy;
 
@@ -185,7 +185,7 @@ pid_t process_execute(const char* file_name) {
 /* A thread function that loads a user process and starts it
    running. */
 static void start_process(void* _arg) {
-    struct process_exec_arg* proc_arg = (struct process_exec_arg*)_arg;
+    struct process_create_arg* proc_arg = (struct process_create_arg*)_arg;
 
     struct pass_args local;
     init_arg(&local);
