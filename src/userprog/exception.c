@@ -149,7 +149,6 @@ static void page_fault(struct intr_frame* f) {
          user ? "user" : "kernel");
          kill(f);
       }
-      // printf("page cow\n");
       //fault addr对应的物理帧
       void* old_kpage = pagedir_get_page(pagedir,fault_addr);
 
@@ -165,7 +164,6 @@ static void page_fault(struct intr_frame* f) {
          clear page不能直接删除旧帧，因为两个process共同指向它
          在此减少引用，等ref == 0才触发删除 */
       pagedir_clear_page(pagedir, fault_addr);
-      // pagedir_decreace_ref(pagedir, old_kpage);
       decreace_frame_ref(old_kpage);
 
       pagedir_set_page(pagedir, fault_addr, new_kpage, true);

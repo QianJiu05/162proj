@@ -27,7 +27,7 @@
 static bool  disk_sync;
 struct prio_list_table{
     uint64_t bit_map;
-    struct list prio_list[PRI_MAX];
+    struct list prio_list[PRI_MAX+1];//PRI_MIN = 0
 };
 /* List of processes in THREAD_READY state, that is, processes
    that are ready to run but not actually running. */
@@ -231,10 +231,10 @@ tid_t thread_create(const char* name, int priority, thread_func* function, void*
   t->parent = thread_current();//链接父线程
 
   /* 添加调试：检查 Fair 调度的初始化 */
-  if (active_sched_policy == SCHED_FAIR) {
-    printf("[CREATE] tid=%d name=%s priority=%d vruntime=%llu stride=%llu\n",
-           tid, name, priority, t->vruntime, t->stride);
-  }
+  // if (active_sched_policy == SCHED_FAIR) {
+  //   printf("[CREATE] tid=%d name=%s priority=%d vruntime=%llu stride=%llu\n",
+  //          tid, name, priority, t->vruntime, t->stride);
+  // }
 
   /* Stack frame for kernel_thread(). */
   kf = alloc_frame(t, sizeof *kf);
@@ -255,10 +255,10 @@ tid_t thread_create(const char* name, int priority, thread_func* function, void*
   thread_unblock(t);
        
   /* 添加调试：检查是否成功入队 */
-  if (active_sched_policy == SCHED_FAIR) {
-    printf("[CREATE] After unblock, fair_ready_list size=%d\n",
-           list_size(&fair_ready_list));
-  }
+  // if (active_sched_policy == SCHED_FAIR) {
+  //   printf("[CREATE] After unblock, fair_ready_list size=%d\n",
+  //          list_size(&fair_ready_list));
+  // }
 
   /* 如果新建的优先级高于当前优先级，立即抢占 */
   if(active_sched_policy == SCHED_PRIO && 
@@ -534,8 +534,8 @@ static void init_thread(struct thread* t, const char* name, int priority) {
         t->stride = get_stride(priority);
 
         intr_set_level(old_level);
-        printf("[INIT] stride=%llu vruntime=%llu\n",
-               t->stride, t->vruntime);
+        // printf("[INIT] stride=%llu vruntime=%llu\n",
+        //        t->stride, t->vruntime);
     }
 
     old_level = intr_disable();
@@ -567,9 +567,7 @@ static struct thread* thread_schedule_prio(void) {
     if(prio_table.bit_map != 0){
       return pop_prio_table(&prio_table);
     }
-    // if (!list_empty(&fifo_ready_list)){
-    //     return get_max_priority(&fifo_ready_list);
-    // }
+
     else
       return idle_thread;
 }
@@ -678,20 +676,14 @@ static tid_t allocate_tid(void) {
    Used by switch.S, which can't figure it out on its own. */
 uint32_t thread_stack_ofs = offsetof(struct thread, stack);
 
-/* prio schedule */
+/* ========== prio schedule ========== */
 static void init_prio_table(struct prio_list_table* table) {
-    for(int i = PRI_MIN; i < PRI_MAX; i++){
+    for(int i = PRI_MIN; i <= PRI_MAX; i++){
         list_init(&table->prio_list[i]);
     }
     table->bit_map = 0;
 }
-// static void set_bit(uint64_t* bitmap, int num){
-//     *bitmap |= (1ULL << num);
-// }
-// static void clear_bit(uint64_t* bitmap, int num){
-//     uint64_t mask = ~(1ULL << num);
-//     *bitmap &= mask;
-// }
+
 static bool push_prio_table(struct prio_list_table* table, struct thread* t) {
     int prio = t->priority;
     list_push_back(&table->prio_list[prio], &t->elem);
@@ -723,28 +715,20 @@ static struct thread* pop_prio_table(struct prio_list_table* table) {
 /* Priority 到 Weight 的映射
  * Linux 风格映射: priority 0-63 -> weight 88761-15
  * 公式: weight = BASE_WEIGHT / (1.25 ^ (priority - 20))  */
-static const uint32_t prio_to_weight[64] = {
-    /* priority 0-9 */
-    88761, 71755, 56483, 46273, 36291,
-    29154, 23254, 18705, 14949, 11916,
-    /* priority 10-19 */
-    9548, 7620, 6100, 4904, 3906,
-    3121, 2501, 1991, 1586, 1277,
-    /* priority 20-29 (默认优先级 = 20) */
-    1024, 820, 655, 526, 423,
-    335, 272, 215, 172, 137,
-    /* priority 30-39 */
-    110, 87, 70, 56, 45,
-    36, 29, 23, 18, 15,
-    /* priority 40-49 */
-    12, 9, 7, 6, 5,
-    4, 3, 3, 2, 2,
-    /* priority 50-59 */
-    1, 1, 1, 1, 1,
-    1, 1, 1, 1, 1,
-    /* priority 60-63 */
-    1, 1, 1, 1
-};
+// static const uint32_t prio_to_weight[64] = {
+//     /* priority 0-9 */
+//     88761, 71755, 56483, 46273, 36291, 29154, 23254, 18705, 14949, 11916,
+//     /* priority 10-19 */
+//     9548, 7620, 6100, 4904, 3906, 3121, 2501, 1991, 1586, 1277,
+//     /* priority 20-29 (默认优先级 = 20) */
+//     1024, 820, 655, 526, 423, 335, 272, 215, 172, 137,
+//     /* priority 30-39 */
+//     110, 87, 70, 56, 45, 36, 29, 23, 18, 15,
+//     /* priority 40-49 */
+//     12, 9, 7, 6, 5, 4, 3, 3, 2, 2,
+//     /* priority 50-63 */
+//     1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1
+// };
 
 /* 根据优先级计算 stride
  * stride 越小，调度越频繁
@@ -752,16 +736,18 @@ static const uint32_t prio_to_weight[64] = {
 static uint64_t get_stride(int priority) {
     ASSERT(priority >= PRI_MIN && priority <= PRI_MAX);
     /* 将 priority 映射到权重表索引 (0-63) */
-    int weight_idx = priority - PRI_MIN;
-    if (weight_idx < 0) weight_idx = 0;
-    if (weight_idx > 63) weight_idx = 63;
+    // int weight_idx = priority - PRI_MIN;
+    // int weight_idx = PRI_MAX - priority;
+    // if (weight_idx < 0) weight_idx = 0;
+    // if (weight_idx > 63) weight_idx = 63;
     
-    uint32_t weight = prio_to_weight[weight_idx];
+    // uint32_t weight = prio_to_weight[weight_idx];
     
+    uint64_t weight = priority - PRI_MIN + 1;
+    if (weight <= 0) weight = 1;
+    if (weight > 64) weight = 64;//+1
     /* 计算 stride = BASE_STRIDE / weight */
     uint64_t stride = BASE_STRIDE / weight;
-    // uint32_t stride = BASE_STRIDE / weight;
-    // uint32_t stride;
     /* 防止 stride 为 0 */
     if (stride == 0) stride = 1;
     
