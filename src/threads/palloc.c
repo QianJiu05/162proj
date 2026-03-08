@@ -11,6 +11,8 @@
 #include "threads/synch.h"
 #include "threads/vaddr.h"
 
+#include <stdlib.h>
+#include "lib/kernel/hash.h"
 /* Page allocator.  Hands out memory in page-size (or
    page-multiple) chunks.  See malloc.h for an allocator that
    hands out smaller chunks.
@@ -35,6 +37,20 @@ struct pool {
 /* Two pools: one for kernel data, one for user pages. */
 static struct pool kernel_pool, user_pool;
 
+
+struct frame_entry {
+   void* page;             /* 物理页面地址 */
+   int64_t ref_cnt;        /* 物理页面被多少进程使用 */
+   struct hash_elem elem;  /* hash node */
+};
+
+struct hash frame_table;
+
+static unsigned frame_hash_func(const struct hash_elem* e, void* aux UNUSED) ;
+static bool frame_less_func(const struct hash_elem* a, const struct hash_elem* b,void* aux UNUSED);
+void increace_frame_ref(uint32_t* page);
+void decreace_frame_ref(uint32_t* page) ;
+
 static void init_pool(struct pool*, void* base, size_t page_cnt, const char* name);
 static bool page_from_pool(const struct pool*, void* page);
 
@@ -54,14 +70,16 @@ void palloc_init(size_t user_page_limit) {
   /* Give half of memory to kernel, half to user. */
   init_pool(&kernel_pool, free_start, kernel_pages, "kernel pool");
   init_pool(&user_pool, free_start + kernel_pages * PGSIZE, user_pages, "user pool");
+  hash_init(&frame_table, frame_hash_func, frame_less_func, NULL);
+
 }
 
-/* Obtains and returns a group of PAGE_CNT contiguous free pages.
-   If PAL_USER is set, the pages are obtained from the user pool,
-   otherwise from the kernel pool.  If PAL_ZERO is set in FLAGS,
-   then the pages are filled with zeros.  If too few pages are
-   available, returns a null pointer, unless PAL_ASSERT is set in
-   FLAGS, in which case the kernel panics. */
+/* 获取并返回一组 PAGE_CNT 个连续的空闲页。
+  如果设置了 PAL_USER，则从用户池获取这些页；
+  否则从内核池获取。如果在 FLAGS 中设置了 PAL_ZERO，
+  则这些页将被填充为零。如果可用页数过少，
+  则返回空指针，除非在 FLAGS 中设置了 PAL_ASSERT，
+  这种情况下，内核将发生 panic。 */
 void* palloc_get_multiple(enum palloc_flags flags, size_t page_cnt) {
   struct pool* pool = flags & PAL_USER ? &user_pool : &kernel_pool;
   void* pages;
@@ -80,8 +98,18 @@ void* palloc_get_multiple(enum palloc_flags flags, size_t page_cnt) {
     pages = NULL;
 
   if (pages != NULL) {
-    if (flags & PAL_ZERO)
-      memset(pages, 0, PGSIZE * page_cnt);
+      if (flags & PAL_ZERO) {
+          memset(pages, 0, PGSIZE * page_cnt);
+          for (int i = 0; i < page_cnt; i++) {
+              struct frame_entry* frame = malloc(sizeof(struct frame_entry));
+              if (frame == NULL) {
+                  PANIC("palloc get NULL frame_entry\n");
+              }
+              frame->page = (void*)((char*)pages + (PGSIZE * i));
+              frame->ref_cnt = 1;
+              hash_insert(&frame_table, &frame->elem);
+          }
+      }
   } else {
     if (flags & PAL_ASSERT)
       PANIC("palloc_get: out of pages");
@@ -98,6 +126,7 @@ void* palloc_get_page(enum palloc_flags flags) { return palloc_get_multiple(flag
 
 /* Frees the PAGE_CNT pages starting at PAGES. */
 void palloc_free_multiple(void* pages, size_t page_cnt) {
+
   struct pool* pool;
   size_t page_idx;
 
@@ -114,12 +143,36 @@ void palloc_free_multiple(void* pages, size_t page_cnt) {
 
   page_idx = pg_no(pages) - pg_no(pool->base);
 
-#ifndef NDEBUG
-  memset(pages, 0xcc, PGSIZE * page_cnt);
-#endif
+// #ifndef NDEBUG
+//   memset(pages, 0xcc, PGSIZE * page_cnt);
+// #endif
+  // ASSERT(bitmap_all(pool->used_map, page_idx, page_cnt));
+  // bitmap_set_multiple(pool->used_map, page_idx, page_cnt, false);
+  /* 改成一页一页判断是否需要释放 */
+  for (int i = 0; i < page_cnt; i++) {
+      ASSERT(bitmap_all(pool->used_map, page_idx+i, 1));
+      char* addr = (char*)pages + i*PGSIZE;
 
-  ASSERT(bitmap_all(pool->used_map, page_idx, page_cnt));
-  bitmap_set_multiple(pool->used_map, page_idx, page_cnt, false);
+      struct frame_entry lookup;
+      lookup.page = addr;  // 只需要设置用于比较的字段
+      struct hash_elem* e = hash_find(&frame_table, &lookup.elem);
+
+      if (e != NULL) {
+          struct frame_entry* f = hash_entry(e, struct frame_entry, elem);
+          f->ref_cnt--;
+          
+          if (f->ref_cnt == 0) {
+            #ifndef NDEBUG
+              // memset(page_idx + i, 0xcc, PGSIZE);
+            #endif
+              bitmap_set_multiple(pool->used_map, page_idx + i, 1, false);
+              hash_delete(&frame_table, &f->elem);// 从哈希表中移除
+              free(f);
+          }
+    }
+  }
+
+
 }
 
 /* Frees the page at PAGE. */
@@ -152,4 +205,75 @@ static bool page_from_pool(const struct pool* pool, void* page) {
   size_t end_page = start_page + bitmap_size(pool->used_map);
 
   return page_no >= start_page && page_no < end_page;
+}
+
+
+/* ========== hash ========== */
+/* 计算 frame_entry 的哈希值（基于物理页面地址） */
+static unsigned frame_hash_func(const struct hash_elem* e, void* aux UNUSED) {
+    const struct frame_entry* f = hash_entry(e, struct frame_entry, elem);
+    return hash_int((int)f->page);  // 使用页面地址作为哈希键
+}
+
+/* 比较两个 frame_entry（基于物理页面地址） */
+static bool frame_less_func(const struct hash_elem* a, 
+                           const struct hash_elem* b, 
+                           void* aux UNUSED) {
+    const struct frame_entry* fa = hash_entry(a, struct frame_entry, elem);
+    const struct frame_entry* fb = hash_entry(b, struct frame_entry, elem);
+    return fa->page < fb->page;
+}
+
+struct frame_entry* hash_get_page(uint32_t* page) {
+    struct frame_entry lookup;
+    lookup.page = page;  // 只需要设置用于比较的字段
+    struct hash_elem* e = hash_find(&frame_table, &lookup.elem);
+
+    if (e != NULL) {
+        struct frame_entry* f = hash_entry(e, struct frame_entry, elem);
+        return f;
+    } else {
+        return NULL;
+    }
+}
+
+void increace_frame_ref(uint32_t* kpage) {
+    if (kpage == NULL) {
+        printf("NULL kpage\n");
+        return;
+    }
+    struct frame_entry* f = hash_get_page(kpage);    
+    if (f != NULL)  
+      f->ref_cnt++;
+}
+
+void decreace_frame_ref(uint32_t* kpage) {
+    if (kpage == NULL) {
+        printf("NULL kpage\n");
+        return;
+    }
+    struct frame_entry* f = hash_get_page(kpage);  
+    if (f != NULL) {
+        f->ref_cnt--;
+        if (f->ref_cnt == 0) {
+            // palloc_free_multiple(kpage,1);
+            
+            hash_delete(&frame_table, &f->elem);// 从哈希表中移除
+            free(f);
+
+            struct pool* pool;
+            if (page_from_pool(&kernel_pool, kpage))
+                pool = &kernel_pool;
+            else if (page_from_pool(&user_pool, kpage))
+                pool = &user_pool;
+
+        #ifndef NDEBUG
+            memset(kpage, 0xcc, PGSIZE);  // 只在真正释放时清零
+        #endif
+            size_t page_idx = pg_no(kpage) - pg_no(pool->base);
+            ASSERT(bitmap_test(pool->used_map, page_idx));
+            bitmap_set(pool->used_map, page_idx, false);
+        }
+    }
+
 }

@@ -3,22 +3,16 @@
 
 /* Hash table.
 
-   This data structure is thoroughly documented in the Tour of
-   Pintos for Project 3.
-
-   This is a standard hash table with chaining.  To locate an
-   element in the table, we compute a hash function over the
-   element's data and use that as an index into an array of
-   doubly linked lists, then linearly search the list.
-
-   The chain lists do not use dynamic allocation.  Instead, each
-   structure that can potentially be in a hash must embed a
-   struct hash_elem member.  All of the hash functions operate on
-   these `struct hash_elem's.  The hash_entry macro allows
-   conversion from a struct hash_elem back to a structure object
-   that contains it.  This is the same technique used in the
-   linked list implementation.  Refer to lib/kernel/list.h for a
-   detailed explanation. */
+   此数据结构在“Pintos 项目 3 的导览”中有详尽的文档说明。
+   这是一个带有链表功能的标准哈希表。要查找表中的元素，
+   我们首先计算该元素数据的哈希函数，
+   然后将其作为索引，指向一个双向链表数组，
+   最后对链表进行线性搜索。
+   链表不使用动态分配内存。
+   相反，每个可能出现在哈希表中的结构体都必须嵌入一个 `struct hash_elem` 成员。
+   所有哈希函数都作用于这些 `struct hash_elem` 成员。`hash_entry` 宏允许将 `struct hash_elem` 成员转换回包含它的结构体对象。
+   这与链表实现中使用的技术相同。
+   有关详细说明，请参阅 `lib/kernel/list.h`。 */
 
 #include <stdbool.h>
 #include <stddef.h>

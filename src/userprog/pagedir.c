@@ -6,6 +6,7 @@
 #include "threads/pte.h"
 #include "threads/palloc.h"
 
+
 static void invalidate_pagedir(uint32_t*);
 
 /* 创建一个新的页面目录，其中包含内核虚拟地址的映射，但不包含用户虚拟地址的映射。
@@ -126,9 +127,10 @@ void pagedir_clear_page(uint32_t* pd, void* upage) {
 
   pte = lookup_page(pd, upage, false);
   if (pte != NULL && (*pte & PTE_P) != 0) {
-    *pte &= ~PTE_P;
-    invalidate_pagedir(pd);
+      *pte &= ~PTE_P;
+      invalidate_pagedir(pd);
   }
+  
 }
 
 /* Returns true if the PTE for virtual page VPAGE in PD is dirty,
@@ -202,14 +204,10 @@ uint32_t* active_pd(void) {
   return ptov(pd);
 }
 
-/* Seom page table changes can cause the CPU's translation
-   lookaside buffer (TLB) to become out-of-sync with the page
-   table.  When this happens, we have to "invalidate" the TLB by
-   re-activating it.
-
-   This function invalidates the TLB if PD is the active page
-   directory.  (If PD is not active then its entries are not in
-   the TLB, so there is no need to invalidate anything.) */
+/* 某些页表更改会导致 CPU 的转换后备缓冲区 (TLB) 与页表不同步。
+  发生这种情况时，我们需要通过重新激活 TLB 来使其“失效”。
+  如果 PD 是活动页目录，则此函数会使 TLB 失效。
+  （如果 PD 未激活，则其条目不在 TLB 中，因此无需使任何内容失效。）*/
 static void invalidate_pagedir(uint32_t* pd) {
   if (active_pd() == pd) {
     /* Re-activating PD clears the TLB.  See [IA32-v3a] 3.12
@@ -228,4 +226,49 @@ bool pagedir_is_writable(uint32_t* pd, const void* vaddr){
         return false;
     }
     return *pte & PTE_W ;
+}
+
+void pagedir_set_writable(uint32_t* pd, void* upage, bool writable) {
+    uint32_t* pte = lookup_page(pd, upage, false);
+    if (pte != NULL && (*pte & PTE_P)) {
+        if (writable)
+            *pte |= PTE_W;
+        else
+            *pte &= ~(uint32_t)PTE_W;
+        /* 重新激活页表 */
+        invalidate_pagedir(pd);
+    }
+}
+
+bool pagedir_is_cow(uint32_t* pd, const void* vaddr) {
+    uint32_t* pte;
+    ASSERT(is_user_vaddr(vaddr));
+    pte = lookup_page(pd,vaddr,false);
+
+    if(pte == NULL || (*pte & PTE_P == 0)){
+        return false;
+    }
+    return *pte & PTE_COW ;
+}
+
+void pagedir_set_cow(uint32_t* pd, void* upage, bool cow) {
+    uint32_t* pte = lookup_page(pd, upage, false);
+    if (pte != NULL && (*pte & PTE_P)) {
+        if (cow)
+            *pte |= PTE_COW;
+        else
+            *pte &= ~(uint32_t)PTE_COW;
+        invalidate_pagedir(pd);
+    }
+}
+
+void pagedir_increace_ref(uint32_t* pd, uint32_t* upage) {
+    uint32_t* pte = lookup_page(pd, upage, false);
+    increace_frame_ref(pte);
+}
+
+void pagedir_decreace_ref(uint32_t* pd, uint32_t* upage) {
+    uint32_t* pte = lookup_page(pd, upage, false);
+    // palloc_free_page(pte_get_page(*pte));
+    decreace_frame_ref(upage);//使用palloc_free_page可以兼顾递减和释放操作
 }

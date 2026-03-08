@@ -5,7 +5,8 @@
 #include "userprog/process.h"
 #include "threads/interrupt.h"
 #include "threads/thread.h"
-
+#include "threads/vaddr.h"
+#include "threads/palloc.h"
 /* Number of page faults processed. */
 static long long page_fault_cnt;
 
@@ -140,17 +141,46 @@ static void page_fault(struct intr_frame* f) {
   /* 要实现虚拟内存，请删除函数体的其余部分，
      并将其替换为将 fault_addr 指向的页面加载到该页面的代码。
    */
-   // if (is_trap_from_userspace(f)) {
-   //    /* 判断当前线程的pagedir是否失效，如果是，free */
-   // }
-
-  printf("Page fault at %p: %s error %s page in %s context.\n", fault_addr,
+   if (!not_present && write) {
+      uint32_t* pagedir = thread_current()->pcb->pagedir;
+      fault_addr = pg_round_down(fault_addr);
+      if (!pagedir_is_cow(pagedir, fault_addr)) {
+           printf("Page fault at %p: %s error %s page in %s context.\n", fault_addr,
          not_present ? "not present" : "rights violation", write ? "writing" : "reading",
          user ? "user" : "kernel");
+         kill(f);
+      }
+      // printf("page cow\n");
+      //fault addr对应的物理帧
+      void* old_kpage = pagedir_get_page(pagedir,fault_addr);
+
+      //分配新的帧,申请的时候ref_cnt已经初始化为1了
+      void* new_kpage = palloc_get_page(PAL_USER | PAL_ZERO);
+      if (new_kpage == NULL) {
+         printf("palloc empty!\n");
+         return;
+      }
+      memcpy(new_kpage, old_kpage, PGSIZE);
+
+      /* clear page删除这个虚拟地址原来的物理帧，然后安装新物理帧
+         clear page不能直接删除旧帧，因为两个process共同指向它
+         在此减少引用，等ref == 0才触发删除 */
+      pagedir_clear_page(pagedir, fault_addr);
+      // pagedir_decreace_ref(pagedir, old_kpage);
+      decreace_frame_ref(old_kpage);
+
+      pagedir_set_page(pagedir, fault_addr, new_kpage, true);
+      pagedir_set_cow(pagedir, fault_addr, false);
+      // printf("copyed\n");
+      return;
+   }
+
+//   printf("Page fault at %p: %s error %s page in %s context.\n", fault_addr,
+//          not_present ? "not present" : "rights violation", write ? "writing" : "reading",
+//          user ? "user" : "kernel");
    /* 用户程序导致page fault，返回exit-1并退出进程*/
    if(user){     
          f->eax = -1;
-         // printf("%s:exit\n",thread_current()->name);
          printf("%s: exit(%d)\n", thread_current()->pcb->process_name, -1);
    }
    kill(f);

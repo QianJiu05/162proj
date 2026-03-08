@@ -17,4 +17,9 @@ void pagedir_activate(uint32_t* pd);
 uint32_t* active_pd(void);
 
 bool pagedir_is_writable(uint32_t* pd, const void* vaddr);
+void pagedir_set_writable(uint32_t* pd, void* upage, bool writable) ;
+bool pagedir_is_cow(uint32_t* pd, const void* vaddr) ;
+void pagedir_set_cow(uint32_t* pd, void* upage, bool cow) ;
+void pagedir_increace_ref(uint32_t* pd, uint32_t* upage) ;
+void pagedir_decreace_ref(uint32_t* pd, uint32_t* upage);
 #endif /* userprog/pagedir.h */

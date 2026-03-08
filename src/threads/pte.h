@@ -3,6 +3,7 @@
 
 #include "threads/vaddr.h"
 
+
 /* Functions and macros for working with x86 hardware page
    tables.
 
@@ -63,6 +64,7 @@ static inline uintptr_t pd_no(const void* va) { return (uintptr_t)va >> PDSHIFT;
 #define PTE_A 0x20           /* 1=accessed, 0=not acccessed. */
 #define PTE_D 0x40           /* 1=dirty, 0=not dirty (PTEs only). */
 
+#define PTE_COW 0x200         /* bit位于PTE_AVL下，1=需要写时复制 */
 /* Returns a PDE that points to page table PT. */
 static inline uint32_t pde_create(uint32_t* pt) {
   ASSERT(pg_ofs(pt) == 0);

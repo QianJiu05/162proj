@@ -32,7 +32,7 @@ extern initial_thread;
 struct lock file_lock;
 
 /* fork */
-static bool copy_memory(uint32_t* parent,uint32_t* child);
+static bool copy_pagedir(uint32_t* parent,uint32_t* child);
 static void start_fork_process(struct child_process *chpcb);
 
 static void release_holding_lock(struct list* list);
@@ -546,7 +546,7 @@ static void start_fork_process(struct child_process *chpcb){
     chpcb->alive = true;
     chpcb->create_success = true;
 
-    success = copy_memory(t->parent->pcb->pagedir,t->pcb->pagedir);
+    success = copy_pagedir(t->parent->pcb->pagedir,t->pcb->pagedir);
     if(success == false){
         goto fail;
     }
@@ -590,35 +590,50 @@ fail:
     }
     thread_exit();//这里没有释放pcb的pd。会造成内存泄漏嘛?-->process_exit?
 }
-static bool copy_memory(uint32_t* parent,uint32_t* child){
-    // void* addr = (void*)0;
-    void* addr = (void*)0x08048000;
-    void* vpage = NULL;
-    bool writable = false;
 
-    for(;addr < PHYS_BASE; addr = (char*)addr + PGSIZE){
-        vpage = pagedir_get_page(parent,addr);
-        
-        if(vpage == NULL){
-            continue;
-        }
-        /* 该物理页不为空，要新申请一页然后memcpy */
-        void* new = palloc_get_page(PAL_USER | PAL_ZERO);
-        if(new == NULL){
-            return false;
-        }
-        memcpy(new,vpage,PGSIZE);
+/* 
+    vaddr(upage) --> parent.kpage --> child.kpage
+*/
+static bool copy_pagedir(uint32_t* parent,uint32_t* child){
 
-        writable = pagedir_is_writable(parent,addr);
-        
-        if(pagedir_set_page(child,addr,new,writable) != true){
-            palloc_free_page(new);
+    void* vaddr = (void*)0x08048000;    /* 虚拟地址 */
+    void* kpage = NULL;                 /* 对应的物理帧 */
+    const bool writable = false;
+    bool success;
+
+    for(;vaddr < PHYS_BASE; vaddr = (char*)vaddr + PGSIZE){
+        //如果存在这个vaddr对应的物理帧
+        kpage = pagedir_get_page(parent,vaddr);
+        if (kpage == NULL) { continue; }
+
+        // 让子进程的同一虚拟地址映射到同一物理帧（只读）
+        if (!pagedir_set_page(child, vaddr, kpage, writable) ) {// writable=false
             return false;
-        }
+        }  
+
+        pagedir_set_writable(parent, vaddr, writable);
+        pagedir_set_cow(parent, vaddr, true);
+        pagedir_set_cow(child, vaddr, true);
+        /* 引用数+1 */
+        increace_frame_ref(kpage);
+        // pagedir_increace_ref(child,vaddr);
     }
+
     return true;
 }
+        // /* 该物理页不为空，要新申请一页然后memcpy */
+        // void* new = palloc_get_page(PAL_USER | PAL_ZERO);
+        // if(new == NULL){
+        //     return false;
+        // }
+        // memcpy(new,kpage,PGSIZE);
 
+        // writable = pagedir_is_writable(parent,addr);
+        
+        // if(pagedir_set_page(child,addr,new,writable) != true){
+        //     palloc_free_page(new);
+        //     return false;
+        // }
 /* Sets up the CPU for running user code in the current
    thread. This function is called on every context switch. */
 void process_activate(void) {

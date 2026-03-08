@@ -36,13 +36,13 @@ bool hash_init(struct hash* h, hash_hash_func* hash, hash_less_func* less, void*
 
 /* Removes all the elements from H.
 
-   If DESTRUCTOR is non-null, then it is called for each element
-   in the hash.  DESTRUCTOR may, if appropriate, deallocate the
-   memory used by the hash element.  However, modifying hash
-   table H while hash_clear() is running, using any of the
-   functions hash_clear(), hash_destroy(), hash_insert(),
-   hash_replace(), or hash_delete(), yields undefined behavior,
-   whether done in DESTRUCTOR or elsewhere. */
+   如果 DESTRUCTOR 不为空，则会对哈希表中的每个元素调用它。
+   DESTRUCTOR 可能会在适当的时候释放哈希元素占用的内存。
+   但是，在 hash_clear() 运行时，
+   使用任何函数 hash_clear()、hash_destroy()、hash_insert()、
+   hash_replace() 或 hash_delete() 修改哈希表 H，都会导致未定义行为，
+
+无论是在 DESTRUCTOR 中还是在其他地方进行修改。 */
 void hash_clear(struct hash* h, hash_action_func* destructor) {
   size_t i;
 
@@ -78,10 +78,9 @@ void hash_destroy(struct hash* h, hash_action_func* destructor) {
   free(h->buckets);
 }
 
-/* Inserts NEW into hash table H and returns a null pointer, if
-   no equal element is already in the table.
-   If an equal element is already in the table, returns it
-   without inserting NEW. */
+/* 将新元素插入哈希表 H，如果：
+  表中不存在相等的元素，则返回空指针。
+  如果表中已存在相等的元素，则返回该元素，而不插入新元素。 */
 struct hash_elem* hash_insert(struct hash* h, struct hash_elem* new) {
   struct list* bucket = find_bucket(h, new);
   struct hash_elem* old = find_elem(h, bucket, new);
