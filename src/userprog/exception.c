@@ -120,8 +120,7 @@ static void page_fault(struct intr_frame* f) {
   void* fault_addr; /* Fault address. */
 
   /* 获取故障地址，即导致故障的被访问的虚拟地址。
-     它可能指向代码或数据。
-     它不一定是导致故障的指令的地址（即 f->eip）。
+     它可能指向代码或数据。它不一定是导致故障的指令的地址（即 f->eip）。
      参见 [IA32-v2a] “MOV——移入/移出控制寄存器” 和
      [IA32-v3a] 5.15 “中断 14——页面错误异常 (#PF)”。*/
   asm("movl %%cr2, %0" : "=r"(fault_addr));
@@ -141,7 +140,7 @@ static void page_fault(struct intr_frame* f) {
   /* 要实现虚拟内存，请删除函数体的其余部分，
      并将其替换为将 fault_addr 指向的页面加载到该页面的代码。
    */
-   if (!not_present && write) {
+   if (!not_present && write && is_user_vaddr(fault_addr)) {
       uint32_t* pagedir = thread_current()->pcb->pagedir;
       fault_addr = pg_round_down(fault_addr);
       if (!pagedir_is_cow(pagedir, fault_addr)) {

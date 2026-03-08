@@ -37,7 +37,7 @@ struct pool {
 /* Two pools: one for kernel data, one for user pages. */
 static struct pool kernel_pool, user_pool;
 
-
+/* ========== hash ========== */
 struct frame_entry {
    void* page;             /* 物理页面地址 */
    int64_t ref_cnt;        /* 物理页面被多少进程使用 */
@@ -50,6 +50,7 @@ static unsigned frame_hash_func(const struct hash_elem* e, void* aux UNUSED) ;
 static bool frame_less_func(const struct hash_elem* a, const struct hash_elem* b,void* aux UNUSED);
 void increace_frame_ref(uint32_t* page);
 void decreace_frame_ref(uint32_t* page) ;
+struct frame_entry* hash_get_page(uint32_t* page) ;
 
 static void init_pool(struct pool*, void* base, size_t page_cnt, const char* name);
 static bool page_from_pool(const struct pool*, void* page);
@@ -100,6 +101,9 @@ void* palloc_get_multiple(enum palloc_flags flags, size_t page_cnt) {
   if (pages != NULL) {
       if (flags & PAL_ZERO) {
           memset(pages, 0, PGSIZE * page_cnt);
+      }
+      /* COPY pagedir只复制用户空间，内核的物理帧不需要管理 */
+      if (flags & PAL_USER) {
           for (int i = 0; i < page_cnt; i++) {
               struct frame_entry* frame = malloc(sizeof(struct frame_entry));
               if (frame == NULL) {
@@ -110,6 +114,7 @@ void* palloc_get_multiple(enum palloc_flags flags, size_t page_cnt) {
               hash_insert(&frame_table, &frame->elem);
           }
       }
+
   } else {
     if (flags & PAL_ASSERT)
       PANIC("palloc_get: out of pages");
@@ -143,32 +148,23 @@ void palloc_free_multiple(void* pages, size_t page_cnt) {
 
   page_idx = pg_no(pages) - pg_no(pool->base);
 
-// #ifndef NDEBUG
-//   memset(pages, 0xcc, PGSIZE * page_cnt);
-// #endif
-  // ASSERT(bitmap_all(pool->used_map, page_idx, page_cnt));
-  // bitmap_set_multiple(pool->used_map, page_idx, page_cnt, false);
   /* 改成一页一页判断是否需要释放 */
   for (int i = 0; i < page_cnt; i++) {
-      ASSERT(bitmap_all(pool->used_map, page_idx+i, 1));
+      // ASSERT(bitmap_all(pool->used_map, page_idx+i, 1));
       char* addr = (char*)pages + i*PGSIZE;
 
       struct frame_entry lookup;
       lookup.page = addr;  // 只需要设置用于比较的字段
       struct hash_elem* e = hash_find(&frame_table, &lookup.elem);
 
-      if (e != NULL) {
-          struct frame_entry* f = hash_entry(e, struct frame_entry, elem);
-          f->ref_cnt--;
-          
-          if (f->ref_cnt == 0) {
-            #ifndef NDEBUG
-              // memset(page_idx + i, 0xcc, PGSIZE);
-            #endif
-              bitmap_set_multiple(pool->used_map, page_idx + i, 1, false);
-              hash_delete(&frame_table, &f->elem);// 从哈希表中移除
-              free(f);
-          }
+      if (e != NULL) { /* 来自哈希表部分，是USER的 */
+          decreace_frame_ref(addr);
+      } else { /* 不在哈希表内，内核页面 */
+            ASSERT(bitmap_test(pool->used_map, page_idx + i));
+#ifndef NDEBUG
+            memset(addr, 0xcc, PGSIZE);
+#endif
+            bitmap_set(pool->used_map, page_idx + i, false);
     }
   }
 
@@ -256,8 +252,6 @@ void decreace_frame_ref(uint32_t* kpage) {
     if (f != NULL) {
         f->ref_cnt--;
         if (f->ref_cnt == 0) {
-            // palloc_free_multiple(kpage,1);
-            
             hash_delete(&frame_table, &f->elem);// 从哈希表中移除
             free(f);
 
