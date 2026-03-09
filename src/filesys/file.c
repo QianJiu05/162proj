@@ -9,6 +9,7 @@ struct file {
   off_t pos;           /* Current position. */
   bool deny_write;     /* Has file_deny_write() been called? */
   int16_t user;
+  //lock??
 };
 
 /* 为给定的 INODE 打开一个文件，并获取该文件的所有权；
@@ -33,6 +34,7 @@ struct file* file_reopen(struct file* file) {
   return file_open(inode_reopen(file->inode));
 
 }
+//要加锁吗?
 struct file* file_fork(struct file* file){
     if(file == NULL){
         return NULL;
@@ -57,11 +59,9 @@ struct inode* file_get_inode(struct file* file) {
   return file->inode;
 }
 
-/* Reads SIZE bytes from FILE into BUFFER,
-   starting at the file's current position.
-   Returns the number of bytes actually read,
-   which may be less than SIZE if end of file is reached.
-   Advances FILE's position by the number of bytes read. */
+/* 从 FILE 读取 SIZE 个字节到 BUFFER，从文件的当前位置开始。
+  返回实际读取的字节数，如果到达文件末尾，则该值可能小于 SIZE。
+  将 FILE 的位置向前移动读取的字节数。 */
 off_t file_read(struct file* file, void* buffer, off_t size) {
   off_t bytes_read = inode_read_at(file->inode, buffer, size, file->pos);
   file->pos += bytes_read;
@@ -77,13 +77,10 @@ off_t file_read_at(struct file* file, void* buffer, off_t size, off_t file_ofs) 
   return inode_read_at(file->inode, buffer, size, file_ofs);
 }
 
-/* Writes SIZE bytes from BUFFER into FILE,
-   starting at the file's current position.
-   Returns the number of bytes actually written,
-   which may be less than SIZE if end of file is reached.
-   (Normally we'd grow the file in that case, but file growth is
-   not yet implemented.)
-   Advances FILE's position by the number of bytes read. */
+/* 从 BUFFER 中向 FILE 写入 SIZE 个字节，从文件的当前位置开始。
+  返回实际写入的字节数，如果到达文件末尾，则该值可能小于 SIZE。
+  （通常情况下，我们会扩展文件，但文件扩展功能尚未实现。）
+  将 FILE 的位置向前移动读取的字节数。 */
 off_t file_write(struct file* file, const void* buffer, off_t size) {
   off_t bytes_written = inode_write_at(file->inode, buffer, size, file->pos);
   file->pos += bytes_written;

@@ -168,7 +168,6 @@ static void page_fault(struct intr_frame* f) {
 
       pagedir_set_page(pagedir, fault_addr, new_kpage, true);
       pagedir_set_cow(pagedir, fault_addr, false);
-      // printf("copyed\n");
       return;
    }
 

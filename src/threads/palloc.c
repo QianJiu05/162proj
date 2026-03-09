@@ -150,7 +150,6 @@ void palloc_free_multiple(void* pages, size_t page_cnt) {
 
   /* 改成一页一页判断是否需要释放 */
   for (int i = 0; i < page_cnt; i++) {
-      // ASSERT(bitmap_all(pool->used_map, page_idx+i, 1));
       char* addr = (char*)pages + i*PGSIZE;
 
       struct frame_entry lookup;
@@ -160,7 +159,7 @@ void palloc_free_multiple(void* pages, size_t page_cnt) {
       if (e != NULL) { /* 来自哈希表部分，是USER的 */
           decreace_frame_ref(addr);
       } else { /* 不在哈希表内，内核页面 */
-            ASSERT(bitmap_test(pool->used_map, page_idx + i));
+          ASSERT(bitmap_test(pool->used_map, page_idx + i));
 #ifndef NDEBUG
             memset(addr, 0xcc, PGSIZE);
 #endif

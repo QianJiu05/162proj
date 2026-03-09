@@ -301,7 +301,6 @@ void clear_bit(uint64_t* bitmap, int num){
 int get_highest_bit1(uint64_t bitmap){
     int clz = __builtin_clzll(bitmap);
     return clz;
-  // return PRI_MAX - clz;
 }
 int get_lowest_bit0(uint64_t bitmap){
     /* 返回的是从右边起连续0的个数，取反的话找的就是连续1的个数 */

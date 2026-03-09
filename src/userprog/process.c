@@ -72,6 +72,7 @@ void userprog_init(void) {
     /* Kill the kernel if we did not succeed */
     ASSERT(success);
 }
+
 static struct pass_args* init_arg(struct pass_args *arg) {
     arg->argc = 0;
     for(int i = 0; i < MAX_ARGC; i++){
@@ -79,6 +80,7 @@ static struct pass_args* init_arg(struct pass_args *arg) {
     }
     return arg;
 }
+
 static void parse_args(const char* file_name, struct pass_args *arg){
     if(file_name == NULL || arg == NULL)return;
 
@@ -105,10 +107,12 @@ static void parse_args(const char* file_name, struct pass_args *arg){
     arg->argc = cnt;
     free(cmd);
 }
+
 struct process_create_arg{
     char* fn_copy;
     struct child_process* child;
 };
+
 static int16_t get_fn_len(const char* file_name){
     int16_t fn_len = 0;
     while(file_name[fn_len] != ' ' && file_name[fn_len] != '\0'){
@@ -131,7 +135,7 @@ pid_t process_execute(const char* file_name) {
 
     /* Make a copy of FILE_NAME.
       Otherwise there's a race between the caller and load(). */
-    fn_copy = palloc_get_page(0);
+    fn_copy = palloc_get_page(0);//申请一块新页，拷贝数据
     if (fn_copy == NULL)
         return TID_ERROR;
     strlcpy(fn_copy, file_name, PGSIZE);
@@ -153,7 +157,10 @@ pid_t process_execute(const char* file_name) {
     child->create_success = false;
     child->exit_status = -1;
     sema_init(&(child->sema),0);
+    
+    enum intr_level old_level = intr_disable();
     list_push_back(&(t->pcb->child_list),&(child->elem));//要关中断吗？
+    intr_set_level(old_level);
 
     struct process_create_arg* proc_arg = calloc(1,sizeof(struct process_create_arg));
     proc_arg->child = child;
@@ -458,9 +465,6 @@ void process_exit(void) {
 pid_t process_fork(void){
     struct thread *t = thread_current();
 
-    // printf("[FORK] Parent '%s' (tid=%d) creating child via fork\n", 
-    //        t->pcb->process_name, t->tid);
-
     struct child_process *child = malloc(sizeof(struct child_process));
     if(child == NULL){
         return TID_ERROR;
@@ -470,7 +474,10 @@ pid_t process_fork(void){
     child->create_success = false;
     child->exit_status = -1;
     sema_init(&(child->sema),0);
+
+    enum intr_level old_level = intr_disable();
     list_push_back(&(t->pcb->child_list),&(child->elem));
+    intr_set_level(old_level);
 
     tid_t tid = thread_create(t->pcb->process_name,PRI_DEFAULT,start_fork_process,child);
     if(tid == TID_ERROR){
@@ -485,7 +492,6 @@ pid_t process_fork(void){
         不论是否成功，然后初始化child_PCB并返回tid */
     sema_down(&child->sema);
     //这里醒了，然后判断是不是true
-    // printf("[FORK]wake up from child:%d\n",child->pid);
     if(child->create_success == false){
         list_remove(&child->elem);
         free(child);
@@ -518,7 +524,7 @@ static void start_fork_process(struct child_process *chpcb){
     list_init(&(t->pcb->child_list));
     list_init(&(t->pcb->multi_thread));
     lock_init(&t->pcb->pthread_lock);
-        lock_init(&t->pcb->user_sync_lock);
+    lock_init(&t->pcb->user_sync_lock);
 
     t->pcb->cwd = t->parent->pcb->cwd;
 
@@ -621,19 +627,7 @@ static bool copy_pagedir(uint32_t* parent,uint32_t* child){
 
     return true;
 }
-        // /* 该物理页不为空，要新申请一页然后memcpy */
-        // void* new = palloc_get_page(PAL_USER | PAL_ZERO);
-        // if(new == NULL){
-        //     return false;
-        // }
-        // memcpy(new,kpage,PGSIZE);
 
-        // writable = pagedir_is_writable(parent,addr);
-        
-        // if(pagedir_set_page(child,addr,new,writable) != true){
-        //     palloc_free_page(new);
-        //     return false;
-        // }
 /* Sets up the CPU for running user code in the current
    thread. This function is called on every context switch. */
 void process_activate(void) {

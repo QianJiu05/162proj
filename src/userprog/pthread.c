@@ -24,7 +24,7 @@
 #include "userprog/syscall.h"
 
 static thread_func start_pthread NO_RETURN;
-bool setup_thread(void (**eip)(void), void** esp);
+// bool setup_thread(void (**eip)(void), void** esp);
 
 /* 启动一个新线程，该线程使用新的用户栈运行 SF，
   并接受TF 和 ARG 作为用户栈上的参数。

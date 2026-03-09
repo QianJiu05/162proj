@@ -766,7 +766,6 @@ static uint64_t get_min_vruntime(struct list* list){
     return t->vruntime;
 }
 static void insert_to_fair_list(struct list* list, struct thread* t) {
-    // printf("[insert] tid=%d,vruntime=%d\n",t->tid,t->vruntime);
     struct list_elem *e;
     
     /* 从前往后遍历,找到第一个 vruntime <= t->vruntime 的位置 */
