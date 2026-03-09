@@ -12,7 +12,7 @@
 #include "threads/synch.h"
 #include <stdio.h>
 #include <kernel/bitmap.h>
-
+#include "lib/kernel/hash.h"
 /* Identifies an inode. */
 #define INODE_MAGIC 0x494e4f44
 
@@ -83,14 +83,28 @@ struct cache_inode {
     bool dirty;
     bool is_writing;
     bool pinned;        /* 已经被占用了，在清理完会分配给占用的来源 */
-    bool recent_used;
+    // bool recent_used;
+    /* === LRU === */
+    struct list_elem list_elem;     /* 挂载双向链表实现LRU */
+    struct hash_elem hash_elem;     /* 挂载哈希表 */
 };
+
+#if 0
 struct cache_inode_table {
     struct cache_inode buffer[CACHE_INODE_NUM];
     uint8_t clk_cnt;
     struct lock* table_lock;
 };
 #define CLK_CNT_ADD(x)    do{ x++; x %= CACHE_INODE_NUM; }while(0)
+struct cache_inode_table {
+    struct cache_inode buffer[CACHE_INODE_NUM];
+    struct lock* table_lock;
+};
+#endif
+
+static unsigned cache_hash_func(const struct hash_elem* e, void* aux UNUSED) ;
+static bool cache_less_func(const struct hash_elem* a, const struct hash_elem* b, void* aux UNUSED) ;
+static void cache_lru_list_init(struct list* list) ;
 
 /* 返回包含 INODE 中字节偏移量 POS 的块设备扇区。
     如果 INODE 中不存在偏移量为 POS 的字节数据，则返回 -1。
@@ -133,22 +147,99 @@ static block_sector_t byte_to_sector(const struct inode* inode, off_t pos) {
 /* List of open inodes, so that opening a single inode twice
    returns the same `struct inode'. */
 static struct list open_inodes;
-static struct cache_inode_table cache_table;
 
 static struct lock open_inode_lock;
 static struct lock disk_alloc_lock;
+static struct hash hash_cache_table;
+static struct list cache_lru_list;
 
-static struct cache_inode* find_cache_inode(block_sector_t sector) {
-    for (int i = 0; i < CACHE_INODE_NUM; i++){
-        if (cache_table.buffer[i].sector == sector &&  cache_table.buffer[i].valid) {
-            cache_table.buffer[i].recent_used = true;
-            return &(cache_table.buffer[i]);
-        }
-    }
-    return NULL;
+/* Initializes the inode module. */
+void inode_init(void) {  
+    list_init(&open_inodes); 
+    lock_init(&open_inode_lock);
+    lock_init(&disk_alloc_lock);
+    cache_lru_list_init(&cache_lru_list);
+    hash_init(&hash_cache_table, cache_hash_func, cache_less_func, NULL);
 }
 
-static void write_cache2_disk(struct cache_inode* cache) {
+static unsigned cache_hash_func(const struct hash_elem* e, void* aux UNUSED) {
+    const struct cache_inode* i = hash_entry(e, struct cache_inode, hash_elem);
+    return hash_int((int)i->sector); 
+}
+
+/* 比较两个 cache_inode） */
+static bool cache_less_func(const struct hash_elem* a, const struct hash_elem* b, void* aux UNUSED) {
+    const struct cache_inode* ia = hash_entry(a, struct cache_inode, hash_elem);
+    const struct cache_inode* ib = hash_entry(b, struct cache_inode, hash_elem);
+    return ia->sector < ib->sector;
+}
+
+static struct cache_inode* find_cache_inode(block_sector_t sector) {
+    struct cache_inode lookup;
+    lookup.sector = sector;
+    struct hash_elem *e = hash_find(&hash_cache_table,&lookup.hash_elem);
+    if (e != NULL) {
+        struct cache_inode* cache = hash_entry(e,struct cache_inode, hash_elem);
+        list_remove(&cache->list_elem);
+        list_push_front(&cache_lru_list, &cache->list_elem);
+        return cache;
+    } else {
+        return NULL;
+    }
+}
+
+static void cache_lru_list_init(struct list* list) {
+    list_init(list);
+    for (int i = 0; i < CACHE_INODE_NUM; i++) {
+        struct cache_inode* cache = malloc(sizeof*cache);
+        if (cache == NULL) {
+            printf("=====cache is null=====\n");
+            return;
+        }
+        cache->valid = false;
+        list_push_front(list, &cache->list_elem);
+    }
+}
+
+static struct cache_inode* get_cache_inode(block_sector_t sector) {
+    struct list_elem* e = list_back(&cache_lru_list);
+    struct cache_inode* cache = list_entry(e, struct cache_inode, list_elem);
+
+    while (cache->pinned != false) {
+        e = e->prev;
+        cache = list_entry(e, struct cache_inode, list_elem);
+    }
+    /* 空inode，直接分配 */
+    if (cache->valid == false) {
+        cache->sector = sector;
+        cache->valid = true;
+        /* 更新LRU list */
+        list_remove(e);
+        list_push_front(&cache_lru_list,e);
+        /* 更新hash */
+        hash_insert(&hash_cache_table, &cache->hash_elem);
+        return cache;
+    }
+    /* 非空，写入disk后更新hash，lru */
+    if (cache->dirty) write_cache2_disk(cache);
+
+    hash_delete(&hash_cache_table, &cache->hash_elem);
+
+    memset(cache->data, 0, BLOCK_SECTOR_SIZE);
+    cache->sector = sector;
+    cache->valid = true;
+    cache->dirty = false;
+    cache->is_writing = false;
+    cache->pinned = false;
+
+    /* 更新hash，lru */
+    list_remove(&cache->list_elem);
+    list_push_front(&cache_lru_list, &cache->list_elem);
+    hash_insert(&hash_cache_table,&cache->hash_elem);
+    return cache;
+}
+
+void write_cache2_disk(struct cache_inode* cache) {
     if (cache->dirty == false || cache->is_writing) { return ; }
 
     cache->is_writing = true;
@@ -157,56 +248,16 @@ static void write_cache2_disk(struct cache_inode* cache) {
     cache->dirty = false;
 }
 
-static struct cache_inode* get_cache_inode(block_sector_t sector) {
-    struct cache_inode* cache;
-
-    for (uint8_t i = CACHE_INODE_NUM * 2; i > 0; i--) {
-        cache = &cache_table.buffer[cache_table.clk_cnt];
-
-        /* 空inode，直接分配 */
-        if (cache->valid == false) {
-            cache->sector = sector;
-            cache->valid = true;
-
-            return cache;
-        }
-
-        /* 最近没有使用，并且没有被pinned */
-        if (cache->recent_used == false && cache->pinned == false) 
-        {
-            if (cache->dirty) 
-                write_cache2_disk(cache);
-            
-            memset(cache, 0, sizeof(struct cache_inode));
-            cache->sector = sector;
-            cache->valid = true;
-            return cache;
-
-        } else {
-            cache->recent_used = false;
-        }
-        CLK_CNT_ADD(cache_table.clk_cnt);
-    }
-    printf("clk algorithm run failed!\n");
-    return NULL;
-}
-
 void write_all2_disk(void) {
-    for (int i = 0; i < CACHE_INODE_NUM; i++) {
-        write_cache2_disk(&cache_table.buffer[i]);
+    struct list_elem* e;
+
+    for (e = list_begin(&cache_lru_list); e != list_end(&cache_lru_list); e = e->next) {
+        struct cache_inode* cache = list_entry(e,struct cache_inode, list_elem);
+        if (cache->valid && cache->dirty) {
+            write_cache2_disk(cache);
+        }
     }
 }
-
-
-/* Initializes the inode module. */
-void inode_init(void) {  
-    list_init(&open_inodes); 
-    memset(&cache_table, 0, sizeof(struct cache_inode_table));
-    lock_init(&open_inode_lock);
-    lock_init(&disk_alloc_lock);
-
-}
-
 /* parameter
     sectors: 要分配的扇区数量
     sector:  存储disk_inode的扇区
@@ -428,7 +479,9 @@ struct inode* inode_open(block_sector_t sector) {
     
     lock_release(&open_inode_lock);
 
-    cache->recent_used = true;
+    // cache->recent_used = true;
+    list_remove(&cache->list_elem);
+    list_push_front(&cache_lru_list, &cache->list_elem);
     cache->pinned = false;
     return inode;
 }
@@ -546,7 +599,7 @@ off_t inode_read_at(struct inode* inode, void* buffer_, off_t size, off_t offset
         block_read(fs_device, sector_idx, cache->data);
         memcpy(buffer + bytes_read, cache->data + sector_ofs, chunk_size);
 
-        cache->recent_used = true;
+        // cache->recent_used = true;
         cache->pinned = false;
 
         size -= chunk_size;
@@ -620,7 +673,7 @@ off_t inode_write_at(struct inode* inode, const void* buffer_, off_t size, off_t
         }
 
         cache->dirty = true;
-        cache->recent_used = true;
+        // cache->recent_used = true;
         cache->pinned = false;
 
         size -= chunk_size;
@@ -661,3 +714,68 @@ bool set_type_dir (block_sector_t sector) {
 bool inode_is_dir (struct inode* inode) {
     return (inode->type == TYPE_DIR);
 }
+
+
+
+
+
+#if 0
+static struct cache_inode* find_cache_inode(block_sector_t sector) {
+    for (int i = 0; i < CACHE_INODE_NUM; i++){
+        if (cache_table.buffer[i].sector == sector &&  cache_table.buffer[i].valid) {
+            cache_table.buffer[i].recent_used = true;
+            return &(cache_table.buffer[i]);
+        }
+    }
+    return NULL;
+}
+
+static void write_cache2_disk(struct cache_inode* cache) {
+    if (cache->dirty == false || cache->is_writing) { return ; }
+
+    cache->is_writing = true;
+    block_write(fs_device, cache->sector, (void*)(cache->data));
+    cache->is_writing = false;
+    cache->dirty = false;
+}
+
+static struct cache_inode* get_cache_inode(block_sector_t sector) {
+    struct cache_inode* cache;
+
+    for (uint8_t i = CACHE_INODE_NUM * 2; i > 0; i--) {
+        cache = &cache_table.buffer[cache_table.clk_cnt];
+
+        /* 空inode，直接分配 */
+        if (cache->valid == false) {
+            cache->sector = sector;
+            cache->valid = true;
+
+            return cache;
+        }
+
+        /* 最近没有使用，并且没有被pinned */
+        if (cache->recent_used == false && cache->pinned == false) 
+        {
+            if (cache->dirty) 
+                write_cache2_disk(cache);
+            
+            memset(cache, 0, sizeof(struct cache_inode));
+            cache->sector = sector;
+            cache->valid = true;
+            return cache;
+
+        } else {
+            cache->recent_used = false;
+        }
+        CLK_CNT_ADD(cache_table.clk_cnt);
+    }
+    printf("clk algorithm run failed!\n");
+    return NULL;
+}
+
+void write_all2_disk(void) {
+    for (int i = 0; i < CACHE_INODE_NUM; i++) {
+        write_cache2_disk(&cache_table.buffer[i]);
+    }
+}
+#endif
