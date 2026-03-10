@@ -107,8 +107,7 @@ static bool cache_less_func(const struct hash_elem* a, const struct hash_elem* b
 static void cache_lru_list_init(struct list* list) ;
 
 /* 返回包含 INODE 中字节偏移量 POS 的块设备扇区。
-    如果 INODE 中不存在偏移量为 POS 的字节数据，则返回 -1。
-*/
+    如果 INODE 中不存在偏移量为 POS 的字节数据，则返回 -1。*/
 static block_sector_t byte_to_sector(const struct inode* inode, off_t pos) {
     ASSERT(inode != NULL);
     
@@ -575,7 +574,6 @@ off_t inode_read_at(struct inode* inode, void* buffer_, off_t size, off_t offset
             // inode_create(sector_idx, )
             break;
         }
-            // break;
 
         /* 缓存命中判断:如果要读的inode已经在cache里了，那么不需要block_read */
         cache = find_cache_inode(sector_idx);
@@ -610,6 +608,100 @@ off_t inode_read_at(struct inode* inode, void* buffer_, off_t size, off_t offset
     rw_lock_release(&inode->rw_lock,1);
     return bytes_read;
 }
+/* 扩展 inode 到新的长度 new_length
+   返回是否成功 */
+static bool inode_extend(struct inode* inode, off_t new_length) {
+    if (new_length <= inode->data.length) { return true; }// 不需要扩展
+    
+    struct inode_disk* disk_inode = &inode->data;
+    /* 计算两个长度之间差了几块sector，每个都单独分配 */
+    size_t old_sectors = bytes_to_sectors(disk_inode->length);
+    size_t new_sectors = bytes_to_sectors(new_length);
+    size_t sectors_to_add = new_sectors - old_sectors;
+    
+    if (sectors_to_add == 0) {
+        // 只是在最后一个扇区内扩展，不需要分配新扇区
+        disk_inode->length = new_length;
+        block_write(fs_device, inode->sector, disk_inode);
+        return true;
+    }
+    
+    /* 计算当前在哪个区间 */
+    size_t current_sector = old_sectors;
+    
+    /* 在直接指针区间扩展 */
+    if (current_sector < NUM_OF_DIRECT) {
+        size_t direct_to_add = new_sectors < NUM_OF_DIRECT ? 
+                               new_sectors - current_sector : 
+                               NUM_OF_DIRECT - current_sector;
+        
+        for (size_t i = 0; i < direct_to_add; i++) {
+            if (!free_map_allocate(1, &disk_inode->direct[current_sector + i])) {
+                // 分配失败，回滚
+                for (size_t j = 0; j < i; j++) {
+                    free_map_release(disk_inode->direct[current_sector + j], 1);
+                }
+                return false;
+            }
+            // 初始化新扇区为零
+            block_write(fs_device, disk_inode->direct[current_sector + i], zeros);
+        }
+        
+        current_sector += direct_to_add;
+        disk_inode->using_direct = current_sector;
+    }
+    
+    /* 在间接指针区间扩展 */
+    if (current_sector < new_sectors && 
+        current_sector < NUM_OF_DIRECT + NUM_OF_INDIRECT * 128) {
+        
+        size_t indirect_start = current_sector < NUM_OF_DIRECT ? 0 : 
+                               (current_sector - NUM_OF_DIRECT) / 128;
+        size_t indirect_end = (new_sectors - NUM_OF_DIRECT + 127) / 128;
+        if (indirect_end > NUM_OF_INDIRECT) indirect_end = NUM_OF_INDIRECT;
+        
+        for (size_t i = indirect_start; i < indirect_end; i++) {
+            struct indirect_disk indirect;
+            
+            // 如果这个间接块还没分配，先分配
+            if (i >= disk_inode->using_indirect) {
+                if (!free_map_allocate(1, &disk_inode->indirect[i])) {
+                    return false;
+                }
+                memset(&indirect, 0, sizeof(indirect));
+                disk_inode->using_indirect = i + 1;
+            } else {
+                // 读取已有的间接块
+                block_read(fs_device, disk_inode->indirect[i], &indirect);
+            }
+            
+            // 计算在这个间接块中要分配多少个扇区
+            size_t start_in_indirect = (current_sector > NUM_OF_DIRECT + i * 128) ?
+                                       current_sector - NUM_OF_DIRECT - i * 128 : 0;
+            size_t end_in_indirect = new_sectors - NUM_OF_DIRECT - i * 128;
+            if (end_in_indirect > 128) end_in_indirect = 128;
+            
+            for (size_t j = start_in_indirect; j < end_in_indirect; j++) {
+                if (!free_map_allocate(1, &indirect.sector[j])) {
+                    block_write(fs_device, disk_inode->indirect[i], &indirect);
+                    return false;
+                }
+                block_write(fs_device, indirect.sector[j], zeros);
+            }
+            
+            // 写回间接块
+            block_write(fs_device, disk_inode->indirect[i], &indirect);
+        }
+        
+        current_sector = new_sectors;
+    }
+    
+    /* 更新长度并写回磁盘 */
+    disk_inode->length = new_length;
+    block_write(fs_device, inode->sector, disk_inode);
+    
+    return true;
+}
 
 /* 从缓冲区 (BUFFER) 向 inode 写入 SIZE 字节，起始位置为 OFFSET。
    返回实际写入的字节数，该值可能小于 SIZE，如果到达文件末尾或发生错误。
@@ -625,20 +717,34 @@ off_t inode_write_at(struct inode* inode, const void* buffer_, off_t size, off_t
     // lock_acquire(&inode->lock);
     rw_lock_acquire(&inode->rw_lock,0);
 
+    /* 看要不要扩展 */
+    off_t write_end = offset + size;
+    if (write_end > inode_length(inode)) {
+        if (!inode_extend(inode, write_end)) {
+            rw_lock_release(&inode->rw_lock, 0);
+            // printf("extend failed\n");
+            return 0;  // 扩展失败
+        }
+    }
+
     while (size > 0) {
         /* Sector to write, starting byte offset within sector. */
         block_sector_t sector_idx = byte_to_sector(inode, offset);
         int sector_ofs = offset % BLOCK_SECTOR_SIZE;
 
         /* Bytes left in inode, bytes left in sector, lesser of the two. */
-        off_t inode_left = inode_length(inode) - offset;
+        // off_t inode_left = inode_length(inode) - offset;
+        // int sector_left = BLOCK_SECTOR_SIZE - sector_ofs;
+        // int min_left = inode_left < sector_left ? inode_left : sector_left;
+
         int sector_left = BLOCK_SECTOR_SIZE - sector_ofs;
-        int min_left = inode_left < sector_left ? inode_left : sector_left;
+        int chunk_size = size < sector_left ? size : sector_left;
 
         /* Number of bytes to actually write into this sector. */
-        int chunk_size = size < min_left ? size : min_left;
-        if (chunk_size <= 0)
-          break;
+        // int chunk_size = size < min_left ? size : min_left;
+        if (chunk_size <= 0) {
+            break;
+        }
         
         cache = find_cache_inode(sector_idx);
         /* 缓存命中 */

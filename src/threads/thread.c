@@ -183,13 +183,7 @@ void thread_tick(void) {
   //     disk_ticks = 0;
   // }
 
-  if (active_sched_policy == SCHED_FAIR && t != idle_thread) {
-      t->vruntime += t->stride;
-      // if (t->tid == 1) {
-      //     printf("[TICK] tid=1 vruntime=%llu stride=%u\n", 
-      //            t->vruntime, t->stride);
-      // }
-  }
+
   /* Enforce preemption. */
   if (++thread_ticks >= TIME_SLICE)
     intr_yield_on_return();
@@ -254,7 +248,7 @@ tid_t thread_create(const char* name, int priority, thread_func* function, void*
   /* Add to run queue. */
   thread_unblock(t);
        
-  /* 添加调试：检查是否成功入队 */
+  /* 检查是否成功入队 */
   // if (active_sched_policy == SCHED_FAIR) {
   //   printf("[CREATE] After unblock, fair_ready_list size=%d\n",
   //          list_size(&fair_ready_list));
@@ -263,6 +257,12 @@ tid_t thread_create(const char* name, int priority, thread_func* function, void*
   /* 如果新建的优先级高于当前优先级，立即抢占 */
   if(active_sched_policy == SCHED_PRIO && 
       t->priority > thread_current()->priority)
+  {
+      thread_yield();
+  }
+
+  if (active_sched_policy == SCHED_FAIR && 
+      t->vruntime < thread_current()->vruntime) 
   {
       thread_yield();
   }
@@ -309,7 +309,6 @@ static void thread_enqueue(struct thread* t) {
           if (!list_empty(&fair_ready_list)) {
               uint64_t min = get_min_vruntime(&fair_ready_list);
               if (min != -1 && t->vruntime < min) {
-                    // printf("t->vruntime=%d, min=%d\n",t->vruntime,min);
                     t->vruntime = min;  // 防止饥饿
               } 
           }
@@ -337,6 +336,16 @@ void thread_unblock(struct thread* t) {
   ASSERT(t->status == THREAD_BLOCKED);
   thread_enqueue(t);
   t->status = THREAD_READY;
+
+  if (active_sched_policy == SCHED_FAIR && !intr_context()
+    && t->vruntime < thread_current()->vruntime)
+  {
+      intr_set_level(old_level);
+      thread_yield();
+      return;
+  } 
+
+
   intr_set_level(old_level);
 }
 
@@ -648,7 +657,15 @@ static void schedule(void) {
   ASSERT(cur->status != THREAD_RUNNING);
   ASSERT(is_thread(next));
 
-  // cur->vruntime += cur->stride * thread_ticks;
+  if (active_sched_policy == SCHED_FAIR && cur != idle_thread) {
+      cur->vruntime += cur->stride * thread_ticks;
+
+    // t->vruntime += t->stride;
+    // if (t->tid == 1) {
+    //     printf("[TICK] tid=1 vruntime=%llu stride=%u\n", 
+    //            t->vruntime, t->stride);
+    // }
+  }
 
   // if (disk_sync) {
   //     write_all2_disk();
@@ -708,50 +725,14 @@ static struct thread* pop_prio_table(struct prio_list_table* table) {
 }
 
 /* ===== CFS schedule ===== */
-/* Stride Scheduling 配置 */
-#define STRIDE_SHIFT 18                      // 精度位数
-#define BASE_STRIDE (88761ULL << STRIDE_SHIFT)  // 基准步长 (约 2^33)
-
-/* Priority 到 Weight 的映射
- * Linux 风格映射: priority 0-63 -> weight 88761-15
- * 公式: weight = BASE_WEIGHT / (1.25 ^ (priority - 20))  */
-// static const uint32_t prio_to_weight[64] = {
-//     /* priority 0-9 */
-//     88761, 71755, 56483, 46273, 36291, 29154, 23254, 18705, 14949, 11916,
-//     /* priority 10-19 */
-//     9548, 7620, 6100, 4904, 3906, 3121, 2501, 1991, 1586, 1277,
-//     /* priority 20-29 (默认优先级 = 20) */
-//     1024, 820, 655, 526, 423, 335, 272, 215, 172, 137,
-//     /* priority 30-39 */
-//     110, 87, 70, 56, 45, 36, 29, 23, 18, 15,
-//     /* priority 40-49 */
-//     12, 9, 7, 6, 5, 4, 3, 3, 2, 2,
-//     /* priority 50-63 */
-//     1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1
-// };
-
 /* 根据优先级计算 stride
  * stride 越小，调度越频繁
  * priority 高 -> weight 大 -> stride 小 -> 运行更频繁  */
+#define STRIDE_LARGE_NUMBER (1 << 20)
+
 static uint64_t get_stride(int priority) {
     ASSERT(priority >= PRI_MIN && priority <= PRI_MAX);
-    /* 将 priority 映射到权重表索引 (0-63) */
-    // int weight_idx = priority - PRI_MIN;
-    // int weight_idx = PRI_MAX - priority;
-    // if (weight_idx < 0) weight_idx = 0;
-    // if (weight_idx > 63) weight_idx = 63;
-    
-    // uint32_t weight = prio_to_weight[weight_idx];
-    
-    uint64_t weight = priority - PRI_MIN + 1;
-    if (weight <= 0) weight = 1;
-    if (weight > 64) weight = 64;//+1
-    /* 计算 stride = BASE_STRIDE / weight */
-    uint64_t stride = BASE_STRIDE / weight;
-    /* 防止 stride 为 0 */
-    if (stride == 0) stride = 1;
-    
-    return stride;
+    return STRIDE_LARGE_NUMBER / (priority + 1);
 }
 
 /* 由于插入是有序的，所以只要把最末尾的pop就行 */
