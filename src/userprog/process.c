@@ -46,14 +46,12 @@ void userprog_init(void) {
     bool success;
 
     /* 分配进程控制块重要的是，这里调用的是 calloc 而不是 malloc，
-       这样才能保证在 t->pcb 被赋值时，
-       t->pcb->pagedir 为 NULL（内核的页目录），
+       这样才能保证在 t->pcb 被赋值时，t->pcb->pagedir 为 NULL（内核的页目录），
        因为定时器中断随时可能发生并激活我们的页目录 */
     t->pcb = calloc(sizeof(struct process), 1);
     success = t->pcb != NULL;
     
-    /* 这里要对初始进程进行pcb建立，
-        不然第一个process_exec在退出后返回不了init */
+    /* 这里要对初始进程进行pcb建立，不然第一个process_exec在退出后返回不了init */
     if(success){
         list_init(&t->pcb->child_list);
         strlcpy(t->pcb->process_name, "init", sizeof(t->pcb->process_name));
@@ -65,7 +63,6 @@ void userprog_init(void) {
         memset(&t->pcb->fdt,0,sizeof(t->pcb->fdt));
         lock_init(&t->pcb->pthread_lock);
         lock_init(&t->pcb->user_sync_lock);
-
     }
     lock_init(&file_lock);
 
@@ -189,6 +186,26 @@ pid_t process_execute(const char* file_name) {
     return tid;
 }
 
+static void process_init_pcb(struct thread* t) {
+    t->pcb->main_thread = t;
+    strlcpy(t->pcb->process_name, t->name, sizeof t->name);
+
+    list_init(&(t->pcb->child_list));
+    list_init(&t->pcb->multi_thread);
+    lock_init(&t->pcb->pthread_lock);
+    lock_init(&t->pcb->user_sync_lock);
+    t->pcb->file_lock = NULL;
+    t->pcb->exiting = false;
+}
+static void process_init_tsb(struct thread* t) {
+    t->tsb = calloc(1,sizeof( struct thread_status_block));
+    t->tsb->tid = t->tid;
+    t->tsb->th = t;
+    t->tsb->been_joined = false;
+    t->tsb->finished = false;
+    sema_init(&t->tsb->join_sema,0);
+
+}
 /* A thread function that loads a user process and starts it
    running. */
 static void start_process(void* _arg) {
@@ -214,25 +231,9 @@ static void start_process(void* _arg) {
         t->pcb = new_pcb;
 
         // Continue initializing the PCB as normal
-        t->pcb->main_thread = t;
-        strlcpy(t->pcb->process_name, t->name, sizeof t->name);
-
-        list_init(&(t->pcb->child_list));
-        list_init(&t->pcb->multi_thread);
-        t->pcb->file_lock = NULL;
+        process_init_pcb(t);
         t->pcb->cwd = dir_open_root();
-
-        t->tsb = calloc(1,sizeof( struct thread_status_block));
-        t->tsb->tid = t->tid;
-        t->tsb->th = t;
-        t->tsb->been_joined = false;
-        t->tsb->finished = false;
-        sema_init(&t->tsb->join_sema,0);
-        lock_init(&t->pcb->pthread_lock);
-        lock_init(&t->pcb->user_sync_lock);
-        
-
-
+        process_init_tsb(t);
 
         if (proc_arg->child != NULL) {
             t->pcb->in_parent = proc_arg->child;
@@ -252,9 +253,9 @@ static void start_process(void* _arg) {
 
     /* Handle failure with succesful PCB malloc. Must free the PCB */
     if (!success && pcb_success) {
-      // Avoid race where PCB is freed before t->pcb is set to NULL
-      // If this happens, then an unfortuantely timed timer interrupt
-      // can try to activate the pagedir, but it is now freed memory
+    // 避免在 t->pcb 设置为 NULL 之前 PCB 被释放的竞争条件
+    // 如果发生这种情况，则一个时机不当的定时器中断可能会尝试激活 pagedir，
+    // 但它现在已被释放内存
       struct process* pcb_to_free = t->pcb;
       t->pcb = NULL;
       if (pcb_to_free->cwd != NULL) {
@@ -338,7 +339,9 @@ void process_exit(void) {
         thread_exit();
         NOT_REACHED();
     }
-
+    cur->pcb->exiting = true;
+/* TODO:改成exiting
+ */
     /* 强制终止所有其他线程 */
     if (!list_empty(&cur->pcb->multi_thread)) {
         struct list_elem *e = list_begin(&cur->pcb->multi_thread);
@@ -500,7 +503,6 @@ pid_t process_fork(void){
     return tid;
 }
 static void start_fork_process(struct child_process *chpcb){
-    // printf("[START]enter\n");
     struct thread* t = thread_current();
     bool success = false, pcb_success = false;
 
@@ -517,15 +519,9 @@ static void start_fork_process(struct child_process *chpcb){
     if(t->pcb->pagedir == NULL){
         goto fail;
     }
-    t->pcb->main_thread = t;
-    memcpy(t->pcb->process_name,t->name,sizeof(t->pcb->process_name));
+    process_init_pcb(t);
     /* fork的进程没有elf */
     t->pcb->elf = NULL;
-    list_init(&(t->pcb->child_list));
-    list_init(&(t->pcb->multi_thread));
-    lock_init(&t->pcb->pthread_lock);
-    lock_init(&t->pcb->user_sync_lock);
-
     t->pcb->cwd = t->parent->pcb->cwd;
 
     if (t->parent == NULL || t->parent->pcb == NULL) {
@@ -821,8 +817,7 @@ bool load(struct pass_args* arg, void (**eip)(void), void** esp) {
     0xbfffffd8   argv[0]        0xbfffffed   char *
     0xbfffffd4   argv           0xbfffffd8   char **
     0xbfffffd0   argc              4         int
-    0xbfffffcc   return address    0         void (*) ()
-*/
+    0xbfffffcc   return address    0         void (*) ()    */
 
     void *new_esp = *esp;
     char* arg_ptrs[MAX_ARGC]; //如果不用固定数组，goto会报错

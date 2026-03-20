@@ -43,6 +43,7 @@ struct process {
    uint32_t* pagedir;          /* Page directory. */
    char process_name[16];      /* Name of the main thread */
    struct thread* main_thread; /* Pointer to main thread */
+   struct intr_frame saved_if;
 
    /* 文件 */
    struct file_descript_table fdt;  /* 文件描述符 */
@@ -53,10 +54,8 @@ struct process {
    struct list child_list;     /* 子进程pid链表 */
    struct child_process* in_parent;  /* 自己在父进程的节点 */
 
-   struct intr_frame saved_if;
-
-
    /* 多线程 */
+   bool  exiting;             /* is_trap_from_user:check exiting */
    struct list multi_thread;  /* 用于挂载多线程tsb */
    struct lock pthread_lock;  /* 分配stack时使用 */
 
